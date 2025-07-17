@@ -1,0 +1,3 @@
+[submodule "OmniLRS"]
+	path = OmniLRS
+	url = https://github.com/OmniLRS/OmniLRS.git
