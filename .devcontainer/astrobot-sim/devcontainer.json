@@ -1,0 +1,34 @@
+{
+  "name": "astrobot-sim",
+  "dockerComposeFile": ["../../docker-compose.yml"],
+  "service": "astrobot-sim",
+  "workspaceFolder": "/workspace/omnilrs",
+  "remoteUser": "root",
+
+  "mounts": [
+    "source=/media/,target=/media/,type=bind,consistency=cached,readonly",
+    "source=./OmniLRS,target=/workspace/omnilrs,type=bind,consistency=cached",
+    "source=./config,target=/config,type=bind,consistency=cached"
+  ],
+
+  "remoteEnv": {
+    "CYCLONEDDS_URI": "file:///config/cyclonedds_config.xml",
+    "ROS_DOMAIN_ID": "10",
+    "ROS_LOCALHOST_ONLY": "0",
+    "RMW_IMPLEMENTATION": "rmw_cyclonedds_cpp"
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-python.python",
+        "ms-iot.vscode-ros"
+      ]
+    }
+  },
+  "settings": {
+    "terminal.integrated.defaultProfile.linux": "bash"
+  },
+  "runArgs": ["--gpus", "all"]
+}

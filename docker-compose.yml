@@ -1,0 +1,53 @@
+version: "3.9"
+
+networks:
+  rosnet:
+    name: rosnet
+    driver: bridge
+services:
+  astrobot-sim:
+    build:
+      context: docker
+      dockerfile: sim.Dockerfile       
+      args:
+        SIM_USER: ${SIM_USER}
+        ASTRO_UID: ${ASTRO_UID}
+        ASTRO_GID: ${ASTRO_GID}
+    user: "${ASTRO_UID}:${ASTRO_GID}"
+    runtime: nvidia
+    networks: [rosnet]
+    volumes:
+      - ./config/cyclonedds_config.xml:/config/cyclonedds_config.xml:ro
+      - ./OmniLRS:/workspace/omnilrs
+    environment:
+      - CYCLONEDDS_URI=file:///config/cyclonedds_config.xml
+      - ROS_DOMAIN_ID=10
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    stdin_open: true
+    tty: true
+    cap_add:
+      - NET_ADMIN
+
+  astrobot-dev:
+    build:
+      context: ./docker                
+      dockerfile: dev.Dockerfile
+      args:
+        DEV_USER: ${DEV_USER}
+        ASTRO_UID: ${ASTRO_UID}
+        ASTRO_GID: ${ASTRO_GID}
+    user: "${ASTRO_UID}:${ASTRO_GID}"
+    runtime: nvidia
+    volumes:
+      - ./config/cyclonedds_config.xml:/config/cyclonedds_config.xml:ro
+      - ./astrobot-lab:/workspace/astrobot-lab
+    environment:
+      - CYCLONEDDS_URI=file:///config/cyclonedds_config.xml
+      - ROS_DOMAIN_ID=10
+      - ROS_LOCALHOST_ONLY=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    stdin_open: true
+    tty: true
+    networks: [rosnet]
+    cap_add:
+      - NET_ADMIN
