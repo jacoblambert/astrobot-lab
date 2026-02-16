@@ -1,0 +1,68 @@
+services:
+  astrobot-sim:
+    image: isaac-sim-omnilrs:latest
+    container_name: astrobot-sim-remote
+    runtime: nvidia
+    network_mode: host
+    ipc: host
+    privileged: true
+    environment:
+      - ACCEPT_EULA=Y
+      - PRIVACY_CONSENT=Y
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-1}
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - SIM_MODE=${SIM_MODE:-stream}
+    volumes:
+      - ./OmniLRS:/workspace/omnilrs:rw
+      - isaac-kit-cache:/isaac-sim/kit/cache:rw
+      - isaac-ov-cache:/root/.cache/ov:rw
+      - isaac-pip-cache:/root/.cache/pip:rw
+      - isaac-gl-cache:/root/.cache/nvidia/GLCache:rw
+      - isaac-compute-cache:/root/.nv/ComputeCache:rw
+      - isaac-logs:/root/.nvidia-omniverse/logs:rw
+      - isaac-data:/root/.local/share/ov/data:rw
+      - isaac-documents:/root/Documents:rw
+      - isaac-history:/commandhistory:rw
+    command:
+      - bash
+      - -lc
+      - |
+        if [ "$${SIM_MODE}" = "omnilrs" ]; then
+          /isaac-sim/python.sh /workspace/omnilrs/run.py rendering.renderer.headless=True
+        else
+          /isaac-sim/runheadless.sh --allow-root
+        fi
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+  astrobot-dev:
+    image: osrf/space-ros:main-dev
+    container_name: astrobot-dev-remote
+    network_mode: host
+    ipc: host
+    privileged: true
+    depends_on:
+      - astrobot-sim
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-1}
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+    volumes:
+      - ./OmniLRS:/workspace/omnilrs:rw
+    command: ["bash", "-lc", "sleep infinity"]
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+volumes:
+  isaac-kit-cache:
+  isaac-ov-cache:
+  isaac-pip-cache:
+  isaac-gl-cache:
+  isaac-compute-cache:
+  isaac-logs:
+  isaac-data:
+  isaac-documents:
+  isaac-history:

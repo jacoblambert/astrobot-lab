@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-IMAGE_TAG="omnilrs:4.5.0-humble"
+IMAGE_TAG="isaac-sim-omnilrs:latest"
 
 docker build \
   -f OmniLRS/omnilrs.docker/Dockerfile \

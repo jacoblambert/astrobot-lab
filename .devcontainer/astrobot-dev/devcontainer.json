@@ -19,7 +19,7 @@
     "RMW_IMPLEMENTATION": "rmw_cyclonedds_cpp"
   },
 
-    "customizations": {
+  "customizations": {
     "vscode": {
       "extensions": [
         "ms-vscode.cpptools",
@@ -30,6 +30,5 @@
   },
   "settings": {
     "terminal.integrated.defaultProfile.linux": "bash"
-  },
-
+  }
 }

@@ -1,5 +1,6 @@
 # .devcontainer/Dockerfile
-FROM osrf/space-ros
+ARG SPACEROS_TAG=main-dev
+FROM osrf/space-ros:${SPACEROS_TAG}
 
 # sudo
 USER root
@@ -25,7 +26,7 @@ RUN apt-get update && \
 COPY dev_entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-RUN echo 'source /opt/spaceros/install/setup.bash' >  /etc/ros_setup.sh && \
+RUN echo 'source /opt/ros/spaceros/setup.bash' >  /etc/ros_setup.sh && \
     echo 'source /etc/ros_setup.sh'                >> /etc/bash.bashrc && \
     chmod 644 /etc/ros_setup.sh
 ENV BASH_ENV=/etc/ros_setup.sh
