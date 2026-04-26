@@ -1,0 +1,4 @@
+[submodule "OmniLRS"]
+	path = OmniLRS
+	url = git@github.com:jacoblambert/OmniLRS.git
+	branch = astrobot/phase1-lunaryard-baseline
