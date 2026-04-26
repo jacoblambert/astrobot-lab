@@ -1,21 +1,30 @@
 services:
   astrobot-sim:
     image: isaac-sim-omnilrs:latest
-    container_name: astrobot-sim-remote
+    container_name: astrobot-sim-lunalab
     runtime: nvidia
-    network_mode: host
+    networks:
+      - ros2
     ipc: host
     privileged: true
     environment:
       - ACCEPT_EULA=Y
       - PRIVACY_CONSENT=Y
-      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-1}
-      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - DISPLAY=${DISPLAY:-}
+      - QT_X11_NO_MITSHM=1
+      - OMNILRS_ENVIRONMENT=${OMNILRS_ENVIRONMENT:-lunalab}
+      - OMNILRS_HEADLESS=${OMNILRS_HEADLESS:-true}
+      - OMNILRS_ROCKS_ENABLED=${OMNILRS_ROCKS_ENABLED:-}
+      - ROS_DOMAIN_ID=177
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///config/cyclonedds_config.xml
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
-      - SIM_MODE=${SIM_MODE:-stream}
     volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ./OmniLRS:/workspace/omnilrs:rw
+      - ./docker:/workspace/astrobot-lab/docker:ro
+      - ./config:/config:ro
       - isaac-kit-cache:/isaac-sim/kit/cache:rw
       - isaac-ov-cache:/root/.cache/ov:rw
       - isaac-pip-cache:/root/.cache/pip:rw
@@ -28,33 +37,42 @@ services:
     command:
       - bash
       - -lc
-      - |
-        if [ "$${SIM_MODE}" = "omnilrs" ]; then
-          /isaac-sim/python.sh /workspace/omnilrs/run.py rendering.renderer.headless=True
-        else
-          /isaac-sim/runheadless.sh --allow-root
-        fi
+      - /workspace/astrobot-lab/docker/run_omnilrs.sh
     restart: unless-stopped
     tty: true
     stdin_open: true
 
   astrobot-dev:
-    image: osrf/space-ros:main-dev
-    container_name: astrobot-dev-remote
-    network_mode: host
+    image: astrobot-dev:latest
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+    container_name: astrobot-dev-lunalab
+    user: root
+    networks:
+      - ros2
     ipc: host
     privileged: true
     depends_on:
       - astrobot-sim
     environment:
-      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-1}
-      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - ROS_DOMAIN_ID=177
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///config/cyclonedds_config.xml
+    ports:
+      - "127.0.0.1:8765:8765"
     volumes:
+      - ./:/workspace/astrobot-lab:rw
       - ./OmniLRS:/workspace/omnilrs:rw
+      - ./config:/config:ro
     command: ["bash", "-lc", "sleep infinity"]
     restart: unless-stopped
     tty: true
     stdin_open: true
+
+networks:
+  ros2:
+    driver: bridge
 
 volumes:
   isaac-kit-cache:

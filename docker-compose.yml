@@ -1,16 +1,22 @@
-version: '3'
-
 services:
   astrobot-sim:
     image: isaac-sim-omnilrs:latest
     container_name: astrobot-sim
     environment:
       - DISPLAY=${DISPLAY}
-      - ROS_DOMAIN_ID=1
+      - ROS_DOMAIN_ID=177
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///config/cyclonedds_config.xml
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ./OmniLRS:/workspace/omnilrs
-    command: ["ros2", "topic", "pub", "/chatter", "std_msgs/msg/String", "data: Hello World!"]
+      - ./config:/config:ro
+    command:
+      [
+        "bash",
+        "-lc",
+        "unset LD_LIBRARY_PATH && source /opt/ros/jazzy/setup.bash && ros2 topic list && echo $RMW_IMPLEMENTATION && ros2 topic pub /chatter std_msgs/msg/String 'data: Hello World!'",
+      ]
     networks:
       - ros2
     ipc: host
@@ -19,14 +25,27 @@ services:
     tty: true
 
   astrobot-dev:
-    image: osrf/space-ros:main-dev
+    image: astrobot-dev:latest
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
     container_name: astrobot-dev
     environment:
       - DISPLAY=${DISPLAY}
-      - ROS_DOMAIN_ID=1
+      - ROS_DOMAIN_ID=177
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///config/cyclonedds_config.xml
+    ports:
+      - "127.0.0.1:8765:8765"
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-    command: ["ros2", "topic", "echo", "/chatter", "std_msgs/msg/String"]
+      - ./config:/config:ro
+    command:
+      [
+        "bash",
+        "-lc",
+        "source /etc/ros_setup.sh && ros2 topic list && echo $RMW_IMPLEMENTATION && ros2 topic echo /chatter std_msgs/msg/String",
+      ]
     networks:
       - ros2
     ipc: host

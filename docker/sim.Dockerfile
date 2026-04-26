@@ -9,7 +9,7 @@ USER root
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        ros-jazzy-rmw-cyclonedds-cpp ros-jazzy-rmw-fastrtps-cpp sudo iproute2 && \
+        ros-jazzy-rmw-cyclonedds-cpp sudo iproute2 && \
     rm -rf /var/lib/apt/lists/*
 
 RUN if ! getent group "${ASTRO_GID}" >/dev/null; then \
@@ -25,7 +25,7 @@ RUN chmod +x /usr/local/bin/sim_entrypoint.sh
 
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
     CYCLONEDDS_URI=file:///config/cyclonedds_config.xml \
-    ROS_DOMAIN_ID=10 \
+    ROS_DOMAIN_ID=177 \
     ROS_DISTRO=jazzy
 
 RUN echo 'source /opt/ros/jazzy/setup.bash' >  /etc/ros_setup.sh && \

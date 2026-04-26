@@ -1,0 +1,13 @@
+command_mux:
+  ros__parameters:
+    use_sim_time: true
+    default_mode: auto
+    publish_rate_hz: 20.0
+    nav_timeout_sec: 0.5
+    teleop_timeout_sec: 0.5
+    max_linear_x: 0.8
+    max_angular_z: 4.0
+    linear_scale: 2.0
+    angular_scale: 5.0
+    angular_scale_positive: 0.0
+    angular_scale_negative: 0.0

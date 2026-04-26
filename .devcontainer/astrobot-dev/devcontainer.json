@@ -1,22 +1,17 @@
 {
   "name": "astrobot-dev",
-  "dockerComposeFile": ["../../docker-compose.yml"],
+  "dockerComposeFile": ["../../docker-compose.lunalab.yml"],
   "service": "astrobot-dev",
   "workspaceFolder": "/workspace/astrobot-lab",
   "remoteUser": "root",
 
-  "mounts": [
-    "source=/media/,target=/media/,type=bind,consistency=cached",
-    "source=./astrobot-lab,target=/workspace/astrobot-lab,type=bind,consistency=cached",
-    "source=./config,target=/config,type=bind,consistency=cached"
-  ],
   "runArgs": ["--gpus", "all"],
 
   "remoteEnv": {
-    "CYCLONEDDS_URI": "file:///config/cyclonedds_config.xml",
-    "ROS_DOMAIN_ID": "10",
+    "ROS_DOMAIN_ID": "177",
     "ROS_LOCALHOST_ONLY": "0",
-    "RMW_IMPLEMENTATION": "rmw_cyclonedds_cpp"
+    "RMW_IMPLEMENTATION": "rmw_cyclonedds_cpp",
+    "CYCLONEDDS_URI": "file:///config/cyclonedds_config.xml"
   },
 
   "customizations": {

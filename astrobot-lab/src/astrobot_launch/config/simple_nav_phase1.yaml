@@ -1,0 +1,4 @@
+# Deprecated compatibility placeholder. Phase 1 uses `nav2_phase1.yaml`.
+simple_navigator:
+  ros__parameters:
+    use_sim_time: true

@@ -1,0 +1,86 @@
+services:
+  astrobot-sim:
+    image: isaac-sim-omnilrs:latest
+    container_name: astrobot-sim-lunaryard
+    runtime: nvidia
+    networks:
+      - ros2
+    ipc: host
+    privileged: true
+    environment:
+      - ACCEPT_EULA=Y
+      - PRIVACY_CONSENT=Y
+      - DISPLAY=${DISPLAY:-}
+      - QT_X11_NO_MITSHM=1
+      - OMNILRS_ENVIRONMENT=${OMNILRS_ENVIRONMENT:-lunaryard_40m}
+      - OMNILRS_HEADLESS=${OMNILRS_HEADLESS:-true}
+      - OMNILRS_ROCKS_ENABLED=${OMNILRS_ROCKS_ENABLED:-}
+      - ROS_DOMAIN_ID=177
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///config/cyclonedds_config.xml
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ./OmniLRS:/workspace/omnilrs:rw
+      - ./docker:/workspace/astrobot-lab/docker:ro
+      - ./config:/config:ro
+      - isaac-kit-cache:/isaac-sim/kit/cache:rw
+      - isaac-ov-cache:/root/.cache/ov:rw
+      - isaac-pip-cache:/root/.cache/pip:rw
+      - isaac-gl-cache:/root/.cache/nvidia/GLCache:rw
+      - isaac-compute-cache:/root/.nv/ComputeCache:rw
+      - isaac-logs:/root/.nvidia-omniverse/logs:rw
+      - isaac-data:/root/.local/share/ov/data:rw
+      - isaac-documents:/root/Documents:rw
+      - isaac-history:/commandhistory:rw
+    command:
+      - bash
+      - -lc
+      - /workspace/astrobot-lab/docker/run_omnilrs.sh
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+  astrobot-dev:
+    image: astrobot-dev:latest
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+    container_name: astrobot-dev-lunaryard
+    user: root
+    networks:
+      - ros2
+    ipc: host
+    privileged: true
+    depends_on:
+      - astrobot-sim
+    environment:
+      - ROS_DOMAIN_ID=177
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///config/cyclonedds_config.xml
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ./:/workspace/astrobot-lab:rw
+      - ./OmniLRS:/workspace/omnilrs:rw
+      - ./config:/config:ro
+    command: ["bash", "-lc", "sleep infinity"]
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+networks:
+  ros2:
+    driver: bridge
+
+volumes:
+  isaac-kit-cache:
+  isaac-ov-cache:
+  isaac-pip-cache:
+  isaac-gl-cache:
+  isaac-compute-cache:
+  isaac-logs:
+  isaac-data:
+  isaac-documents:
+  isaac-history:

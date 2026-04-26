@@ -1,3 +1,9 @@
 # LLMs
 AGENTS.md
 MISSION.md
+IMPLEMENTATION.md
+.codex
+odom
+astrobot-lab/build/
+astrobot-lab/install/
+astrobot-lab/log/
