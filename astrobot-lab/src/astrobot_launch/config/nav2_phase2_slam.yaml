@@ -68,16 +68,16 @@ controller_server:
       primary_controller: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
       angular_dist_threshold: 0.50
       forward_sampling_distance: 0.35
-      rotate_to_heading_angular_vel: 0.50
-      max_angular_accel: 1.0
+      rotate_to_heading_angular_vel: 0.30
+      max_angular_accel: 0.5
       simulate_ahead_time: 0.5
       rotate_to_goal_heading: false
       rotate_to_heading_once: false
       use_path_orientations: false
-      desired_linear_vel: 0.14
-      lookahead_dist: 0.35
-      min_lookahead_dist: 0.20
-      max_lookahead_dist: 0.50
+      desired_linear_vel: 0.12
+      lookahead_dist: 0.45
+      min_lookahead_dist: 0.25
+      max_lookahead_dist: 0.65
       lookahead_time: 1.5
       use_velocity_scaled_lookahead_dist: true
       transform_tolerance: 0.2

@@ -7,3 +7,6 @@ odom
 astrobot-lab/build/
 astrobot-lab/install/
 astrobot-lab/log/
+rosbags/
+__pycache__/
+*.pyc

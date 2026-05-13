@@ -22,6 +22,8 @@ class CommandMux(Node):
         self.declare_parameter("angular_scale", 1.0)
         self.declare_parameter("angular_scale_positive", 0.0)
         self.declare_parameter("angular_scale_negative", 0.0)
+        self.declare_parameter("max_linear_accel", 0.0)
+        self.declare_parameter("max_angular_accel", 0.0)
         self.declare_parameter("default_mode", "auto")
 
         self.publish_rate_hz = float(self.get_parameter("publish_rate_hz").value)
@@ -33,6 +35,8 @@ class CommandMux(Node):
         self.angular_scale = float(self.get_parameter("angular_scale").value)
         self.angular_scale_positive = float(self.get_parameter("angular_scale_positive").value)
         self.angular_scale_negative = float(self.get_parameter("angular_scale_negative").value)
+        self.max_linear_accel = float(self.get_parameter("max_linear_accel").value)
+        self.max_angular_accel = float(self.get_parameter("max_angular_accel").value)
         self.mode = str(self.get_parameter("default_mode").value).strip().lower()
         if self.mode not in {"auto", "nav", "teleop", "hold"}:
             self.mode = "auto"
@@ -44,6 +48,7 @@ class CommandMux(Node):
         self._teleop_stamp = None
         self._last_source = "hold"
         self._last_output = Twist()
+        self._last_publish_time = time.monotonic()
 
         self.cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self.status_pub = self.create_publisher(DiagnosticArray, "/control/status", 10)
@@ -83,6 +88,7 @@ class CommandMux(Node):
 
     def _publish_loop(self) -> None:
         output, source = self._select_command()
+        output = self._apply_accel_limits(output, source)
         self._last_output = output
         self._last_source = source
         self.cmd_pub.publish(output)
@@ -154,6 +160,35 @@ class CommandMux(Node):
             angular_scale = self.angular_scale_negative
         limited.angular.z = self._clamp(msg.angular.z * angular_scale, -self.max_angular_z, self.max_angular_z)
         return limited
+
+    def _apply_accel_limits(self, target: Twist, source: str) -> Twist:
+        now = time.monotonic()
+        dt = max(now - self._last_publish_time, 0.0)
+        self._last_publish_time = now
+
+        if source == "hold" or (self.max_linear_accel <= 0.0 and self.max_angular_accel <= 0.0):
+            return target
+
+        limited = Twist()
+        limited.linear.x = self._rate_limit(
+            self._last_output.linear.x,
+            target.linear.x,
+            self.max_linear_accel,
+            dt,
+        )
+        limited.angular.z = self._rate_limit(
+            self._last_output.angular.z,
+            target.angular.z,
+            self.max_angular_accel,
+            dt,
+        )
+        return limited
+
+    def _rate_limit(self, current: float, target: float, max_rate: float, dt: float) -> float:
+        if max_rate <= 0.0 or dt <= 0.0:
+            return target
+        max_delta = max_rate * dt
+        return current + self._clamp(target - current, -max_delta, max_delta)
 
     def _is_fresh(self, stamp, timeout_sec: float) -> bool:
         if stamp is None:

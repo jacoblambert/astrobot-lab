@@ -58,6 +58,13 @@ def generate_launch_description() -> LaunchDescription:
                 parameters=[nav2_params],
             ),
             Node(
+                package="nav2_behaviors",
+                executable="behavior_server",
+                name="behavior_server",
+                output="screen",
+                parameters=[nav2_params],
+            ),
+            Node(
                 package="nav2_lifecycle_manager",
                 executable="lifecycle_manager",
                 name="lifecycle_manager_navigation",
@@ -71,6 +78,7 @@ def generate_launch_description() -> LaunchDescription:
                             "planner_server",
                             "controller_server",
                             "bt_navigator",
+                            "behavior_server",
                         ],
                     }
                 ],

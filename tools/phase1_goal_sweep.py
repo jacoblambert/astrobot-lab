@@ -44,14 +44,18 @@ def compose_pose(a: Pose2D, b: Pose2D) -> Pose2D:
 
 
 class GoalSweepNode(Node):
-    def __init__(self) -> None:
+    def __init__(self, pose_topic: Optional[str] = None) -> None:
         super().__init__("phase1_goal_sweep")
         self.map_msg: Optional[OccupancyGrid] = None
         self.odom_msg: Optional[Odometry] = None
+        self.pose_msg: Optional[PoseStamped] = None
+        self.pose_topic = pose_topic
         self.tf_msgs = []
         self.tf_static_msgs = []
         self.map_sub = self.create_subscription(OccupancyGrid, "/map", self._map_cb, 10)
         self.odom_sub = self.create_subscription(Odometry, "/odom", self._odom_cb, 50)
+        if self.pose_topic:
+            self.pose_sub = self.create_subscription(PoseStamped, self.pose_topic, self._pose_cb, 50)
         self.tf_sub = self.create_subscription(TFMessage, "/tf", self._tf_cb, 100)
         self.tf_static_sub = self.create_subscription(TFMessage, "/tf_static", self._tf_static_cb, 100)
         self.nav_client = ActionClient(self, NavigateToPose, "/navigate_to_pose")
@@ -61,6 +65,9 @@ class GoalSweepNode(Node):
 
     def _odom_cb(self, msg: Odometry) -> None:
         self.odom_msg = msg
+
+    def _pose_cb(self, msg: PoseStamped) -> None:
+        self.pose_msg = msg
 
     def _tf_cb(self, msg: TFMessage) -> None:
         self.tf_msgs.extend(msg.transforms)
@@ -76,6 +83,13 @@ class GoalSweepNode(Node):
         return matches[-1] if matches else None
 
     def current_pose_in_map(self) -> Pose2D:
+        if self.pose_msg is not None:
+            return Pose2D(
+                x=self.pose_msg.pose.position.x,
+                y=self.pose_msg.pose.position.y,
+                yaw=yaw_from_quaternion(self.pose_msg.pose.orientation),
+            )
+
         map_to_odom = self.latest_transform("map", "odom")
         if map_to_odom is None or self.odom_msg is None:
             raise RuntimeError("missing map->odom transform or /odom")
@@ -170,9 +184,12 @@ class GoalSweepNode(Node):
         deadline = time.time() + timeout_sec
         while time.time() < deadline:
             rclpy.spin_once(self, timeout_sec=0.1)
-            if self.map_msg is not None and self.odom_msg is not None and self.latest_transform("map", "odom"):
+            has_pose_source = self.pose_msg is not None or (
+                self.odom_msg is not None and self.latest_transform("map", "odom")
+            )
+            if self.map_msg is not None and has_pose_source:
                 return
-        raise RuntimeError("timed out waiting for map, /odom, and map->odom")
+        raise RuntimeError("timed out waiting for map and pose source")
 
     def send_goal(self, x: float, y: float, yaw: float, timeout_sec: float) -> tuple[int, Pose2D, int, str]:
         if not self.nav_client.wait_for_server(timeout_sec=5.0):
@@ -219,6 +236,11 @@ def main() -> int:
     parser.add_argument("--occupied-threshold", type=int, default=50)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--pose-topic",
+        default=None,
+        help="Optional PoseStamped topic in map frame for route start and endpoint evaluation, e.g. /gt/base_link_pose.",
+    )
+    parser.add_argument(
         "--relative-goals",
         nargs="+",
         default=None,
@@ -234,7 +256,7 @@ def main() -> int:
     args = parser.parse_args()
 
     rclpy.init()
-    node = GoalSweepNode()
+    node = GoalSweepNode(pose_topic=args.pose_topic)
     try:
         node.wait_for_data()
         relative_goals = list(args.relative_goals or [])

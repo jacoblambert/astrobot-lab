@@ -25,6 +25,14 @@ export ROS_DOMAIN_ID="${ORIG_ROS_DOMAIN_ID}"
 export RMW_IMPLEMENTATION="${ORIG_RMW_IMPLEMENTATION}"
 export CYCLONEDDS_URI="${ORIG_CYCLONEDDS_URI}"
 
+if [[ "${ASTROBOT_AUTO_BUILD:-false}" == "true" && -d /workspace/astrobot-lab/astrobot-lab/src ]]; then
+  echo "[astrobot-dev] Building ROS overlay in /workspace/astrobot-lab/astrobot-lab"
+  cd /workspace/astrobot-lab/astrobot-lab
+  colcon build --symlink-install
+  # shellcheck disable=SC1091
+  source /workspace/astrobot-lab/astrobot-lab/install/setup.bash
+fi
+
 # Prevent stale daemon middleware mismatch between sessions.
 ros2 daemon stop >/dev/null 2>&1 || true
 pkill -f _ros2_daemon >/dev/null 2>&1 || true

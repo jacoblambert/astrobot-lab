@@ -56,6 +56,7 @@ The sim service now uses:
 - `OMNILRS_HEADLESS=true|false`
 - `OMNILRS_ENVIRONMENT=lunaryard_40m|lunalab|...`
 - `OMNILRS_ROCKS_ENABLED=true|false`
+- `OMNILRS_GT_TF_ENABLED=true|false`
 
 If GUI mode is requested without `DISPLAY`, the sim exits early with a clear error instead of silently starting with no window.
 
@@ -68,6 +69,11 @@ OMNILRS_ROCKS_ENABLED=false docker compose -f docker-compose.lunaryard.yml up -d
 ```
 
 This sets `environment.rocks_settings.enable` in the selected OmniLRS environment config before the scene is built.
+
+For Phase 2 SLAM evaluation, keep simulator GT enabled and use it only as the
+safe driving/evaluation reference. Do not disable simulator-owned `map -> odom`
+for Phase 2 runs; SLAM-frame navigation starts in Phase 3 after a SLAM-derived
+BEV map exists.
 
 Open a shell in the dev container:
 
@@ -108,11 +114,14 @@ Then connect from Foxglove Desktop or `https://app.foxglove.dev` to:
 ws://localhost:8765
 ```
 
-### 6. Build the local ROS workspace
+### 6. Prepare the local ROS workspace
+
+`astrobot-dev` auto-builds the mounted ROS workspace at container startup. If you
+change ROS code while the container is already running, recreate the dev service
+instead of doing a manual post-launch build:
 
 ```bash
-docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
-  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && colcon build --symlink-install'
+docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate astrobot-dev
 ```
 
 ### 7. Launch Phase 1 navigation
@@ -168,7 +177,60 @@ Current rocks-enabled Phase 1 baseline, validated on 2026-04-26 in `docker-compo
   - one free-space stress goal aborted with controller error `103` (`FollowPath.INVALID_PATH`)
   - occupied goals: `4/4` blocked cleanly with planner error `208`
 
-### 8. Optional local GUI smoke test
+### 8. Phase 2 GLIM SLAM Bring-Up
+
+Phase 2 is validated as SLAM evaluation, not as GT-map localization. Nav2 still plans and controls from simulator GT `/map` and GT `map -> odom`; GLIM runs in parallel and is evaluated against true simulator pose and SLAM-frame revisit consistency. Phase 3 will consume a SLAM-derived BEV map and send goals in the SLAM map frame.
+
+`astrobot-dev` installs GLIM from Koide's Jazzy/CUDA packages:
+
+- `ros-jazzy-glim-ros-cuda12.6`
+- `cuda-cudart-12-6`
+
+Start/recreate the Docker services. `astrobot-dev` auto-builds the mounted ROS
+overlay at container startup, so normal usage does not require a manual
+post-launch `colcon build`.
+
+```bash
+OMNILRS_ROCKS_ENABLED=true docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
+```
+
+Run the combined Phase 1 Nav2 + Phase 2 GLIM safe-eval launch:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch astrobot_master.launch.py nav2_params:=/workspace/astrobot-lab/astrobot-lab/src/astrobot_launch/config/nav2_phase2_slam.yaml'
+```
+
+Record a reproducible Phase 2 bag while that launch is running:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab && source astrobot-lab/install/setup.bash && tools/record_phase2_bag.sh rocks_random_long /workspace/astrobot-lab/rosbags'
+```
+
+Current rocks-collision Phase 2 validation baseline from 2026-05-10:
+
+- `rosbags/phase2_rocks_random_long_20260510_015055` confirms LiDAR-visible rocks after replacing point-instanced rocks with explicit collider-backed rock prims. Corrected/base yaw-aligned ATE with one invalid GT `(0,0)` sample removed: RMSE `0.049 m`, p95 `0.085 m`, final `0.081 m`. SLAM-frame revisit p95 is `0.578 m`, with `100%` of revisits within `1.0 m`.
+- `rosbags/phase2_rocks_double_loop_20260510_023005` uses the denser GLIM map config. Corrected/base yaw-aligned ATE: RMSE `0.108 m`, p95 `0.249 m`, final `0.048 m`. SLAM-frame revisit p95 is `0.632 m`, with `100%` of revisits within `1.0 m`.
+- Rock-height diagnostics on the tuned double-loop show `/pointcloud/filtered` contains `5457` samples above `0.20 m`, and `/glim_rosnode/map` contains `1533` samples above `0.20 m`.
+- Rock-focused BEV comparison is now tracked separately. Tuned double-loop feature recall improved to `0.218`, but feature F1 remains low at `0.141`; treat this as a Phase 3 map-quality target, not as evidence that rocks are absent.
+- Phase 2 is accepted for GLIM SLAM bring-up, loop/revisit consistency, and BEV map handoff. The current `/slam/bev_costmap` is the Phase 3 starting point for traversability and Weighted A*; Phase 3 owns final navigation-map safety/connectivity tuning.
+- The older 2026-04-29 Phase 2 pass is superseded for rock validation because the prior point-instanced rocks were represented in GT `/map` but were not reliably visible to LiDAR.
+
+Important Phase 2 details:
+
+- Simulator GT remains evaluation-only for SLAM metrics.
+- GLIM consumes `/pointcloud/filtered`, generated from `/pointcloud` by a small crop-box filter that removes robot-body returns.
+- GLIM keeps raw points in its map output for visualization. Current mapping config reduces GLIM preprocessing/downsampling to preserve rock geometry (`downsample_resolution=0.25`, submap/global voxel resolution `0.25`).
+- `tools/record_phase2_bag.sh` records true simulator pose from `/gt/base_link_pose`.
+- Direct live-recorded TUM evaluation is currently the authoritative path. `ros2 bag play` replay can shift `/clock` on some recordings, which breaks timestamp matching for replay-generated GLIM poses.
+- GLIM `T_lidar_imu` is IMU-frame to LiDAR-frame; the current config uses simulator TF `vlp16 <- Imu_Sensor = [0.414, 0.017, 0.153, 0, 0, 1, 0]`.
+- GLIM ROS pose is treated as IMU-frame for metric conversion; `slam_eval transform_tum` converts it to base-frame with `[0.264, 0.017, -0.262, yaw=pi]`.
+- For live Foxglove viewing, use fixed frame `glim_map` and start with `/glim_rosnode/aligned_points_corrected`; `/glim_rosnode/map` is GLIM's global-map PointCloud2 output and may update less continuously than the aligned local/submap cloud.
+- The packaged GLIM build does not include `libimu_validator.so`; use GLIM's built-in validation logs unless `glim_ext` is built from source.
+- Do not disable simulator GT TF or publish a SLAM-owned `map -> odom` while sending GT-map goals for Phase 2; that mixes coordinate frames and is intentionally not a supported path.
+
+### 9. Optional local GUI smoke test
 
 ```bash
 xhost +local:root

@@ -5,9 +5,11 @@ command_mux:
     publish_rate_hz: 20.0
     nav_timeout_sec: 0.5
     teleop_timeout_sec: 0.5
-    max_linear_x: 0.8
-    max_angular_z: 4.0
-    linear_scale: 2.0
-    angular_scale: 5.0
+    max_linear_x: 0.30
+    max_angular_z: 1.50
+    linear_scale: 1.0
+    angular_scale: 1.5
     angular_scale_positive: 0.0
     angular_scale_negative: 0.0
+    max_linear_accel: 0.20
+    max_angular_accel: 0.80

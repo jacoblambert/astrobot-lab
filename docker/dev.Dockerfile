@@ -1,5 +1,7 @@
 ARG SPACEROS_TAG=main-dev
 FROM osrf/space-ros:${SPACEROS_TAG}
+ARG GLIM_ROS_PACKAGE=ros-jazzy-glim-ros-cuda12.6
+ARG CUDA_RUNTIME_PACKAGE=cuda-cudart-12-6
 
 USER root
 
@@ -8,7 +10,10 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
       curl \
+      build-essential \
+      cmake \
       iproute2 \
+      ros-jazzy-ament-cmake \
       python3-colcon-common-extensions \
       python3-yaml \
       sudo \
@@ -19,6 +24,31 @@ RUN set -eux; \
       ros-jazzy-ros2bag \
       ros-jazzy-rosbag2-storage-default-plugins \
       ros-jazzy-teleop-twist-keyboard; \
+    rm -rf /var/lib/apt/lists/*
+
+# GLIM provides the Phase 2 LiDAR-IMU SLAM stack. Prefer the CUDA Jazzy package.
+# The GLIM package links against libcudart, which is not provided by the NVIDIA
+# container runtime driver mounts.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends curl gpg; \
+    curl -fsSL -o /tmp/cuda-keyring.deb \
+      "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb"; \
+    dpkg -i /tmp/cuda-keyring.deb; \
+    rm -f /tmp/cuda-keyring.deb; \
+    curl -s --compressed "https://koide3.github.io/ppa/ubuntu2404/KEY.gpg" \
+      | gpg --dearmor > /etc/apt/trusted.gpg.d/koide3_ppa.gpg; \
+    echo "deb [signed-by=/etc/apt/trusted.gpg.d/koide3_ppa.gpg] https://koide3.github.io/ppa/ubuntu2404 ./" \
+      > /etc/apt/sources.list.d/koide3_ppa.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      "${CUDA_RUNTIME_PACKAGE}" \
+      libboost-all-dev \
+      libglfw3-dev \
+      libiridescence-dev \
+      libmetis-dev \
+      "${GLIM_ROS_PACKAGE}"; \
+    ldconfig; \
     rm -rf /var/lib/apt/lists/*
 
 ENV ROS_DOMAIN_ID=177 \

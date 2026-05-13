@@ -15,6 +15,7 @@ services:
       - OMNILRS_ENVIRONMENT=${OMNILRS_ENVIRONMENT:-lunaryard_40m}
       - OMNILRS_HEADLESS=${OMNILRS_HEADLESS:-true}
       - OMNILRS_ROCKS_ENABLED=${OMNILRS_ROCKS_ENABLED:-}
+      - OMNILRS_GT_TF_ENABLED=${OMNILRS_GT_TF_ENABLED:-true}
       - ROS_DOMAIN_ID=177
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - CYCLONEDDS_URI=file:///config/cyclonedds_config.xml
@@ -48,6 +49,7 @@ services:
       context: .
       dockerfile: docker/dev.Dockerfile
     container_name: astrobot-dev-lunaryard
+    runtime: nvidia
     user: root
     networks:
       - ros2
@@ -59,6 +61,9 @@ services:
       - ROS_DOMAIN_ID=177
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - CYCLONEDDS_URI=file:///config/cyclonedds_config.xml
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - ASTROBOT_AUTO_BUILD=${ASTROBOT_AUTO_BUILD:-true}
     ports:
       - "127.0.0.1:8765:8765"
     volumes:
