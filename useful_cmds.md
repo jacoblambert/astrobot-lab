@@ -156,8 +156,7 @@ Visualize these topics in Foxglove:
 /glim_rosnode/aligned_points_corrected
 /glim_rosnode/points_corrected
 /glim_rosnode/map
-/slam/voxel_map
-/slam/bev_map
+/slam/prob_voxel_map
 /slam/bev_costmap
 /navigate_to_pose/_action/status
 ```
@@ -169,14 +168,23 @@ events. GLIM is configured with `keep_raw_points=true` so the global map is
 more useful visually than the heavily preprocessed odometry cloud.
 
 For navigation-map work, prefer the modular map chain over `/glim_rosnode/map`:
-`/glim_rosnode/aligned_points_corrected` -> `/slam/voxel_map` -> `/slam/bev_costmap`.
-`/slam/voxel_map` is a `PointCloud2` of occupied 3D voxel centers, currently
-defaulting to `0.05 m` voxels. `/slam/bev_costmap` is a regular
-`nav_msgs/OccupancyGrid` generated from terrain-relative obstacle evidence,
-per-cell height span, local slope, and a conservative obstacle inflation radius.
-`/slam/bev_map` is the older simple height-span diagnostic projection. GLIM's
-`/glim_rosnode/map` did not publish messages in the 2026-05-10 rocks map-eval
-run.
+`/glim_rosnode/aligned_points_corrected` + `/glim_rosnode/pose_corrected` ->
+`/slam/prob_voxel_map` -> `/slam/bev_costmap`. `/slam/prob_voxel_map` is a
+probabilistic 3D occupancy map with volumetric ray clearing; high LiDAR beams
+clear only the voxels they pass through, not the full BEV column below them.
+`/slam/bev_costmap` is a regular `nav_msgs/OccupancyGrid` derived from the 3D
+map. GLIM's `/glim_rosnode/map` is useful when it publishes, but it is not the
+navigation map source.
+
+Run the probabilistic mapper unit tests and a short offline rosbag smoke test:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml run --rm --no-deps -e ASTROBOT_AUTO_BUILD=false astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && colcon build --symlink-install --packages-select slam_mapping astrobot_launch --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo && ./build/slam_mapping/test_probabilistic_voxel_map'
+
+docker compose -f docker-compose.lunaryard.yml run --rm --no-deps -e ASTROBOT_AUTO_BUILD=false astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && timeout 8 ros2 launch astrobot_launch phase2_slam.launch.py start_glim:=false start_bev_map:=false'
+```
 
 Record the Phase 2 random-long validation route:
 
@@ -240,7 +248,7 @@ docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
   'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && BAG=/workspace/astrobot-lab/rosbags/<bag_dir> && ros2 run slam_eval analyze_pointcloud_height --bag $BAG/bag --topics /pointcloud /pointcloud/filtered /glim_rosnode/aligned_points_corrected /glim_rosnode/map --cell-size 0.5 --max-radius 15.0 --min-points-per-cell 4'
 ```
 
-When replaying a bag to regenerate `/slam/voxel_map` and `/slam/bev_costmap`,
+When replaying a bag to regenerate `/slam/prob_voxel_map` and `/slam/bev_costmap`,
 use a moderate replay rate such as `--rate 5.0`. At `--rate 20.0`, the voxel
 builder can drop enough point clouds to produce an incomplete costmap and weak
 GT-map overlap scores.
@@ -267,7 +275,7 @@ phase2_rocks_map_eval_20260510_094803:
   feature_precision=0.172, feature_f1=0.288.
   GT-registered raw `/pointcloud/filtered` upper-bound on the same route:
   BEV f1=0.278, iou=0.165, feature_recall=0.703, feature_f1=0.284.
-  Runtime `/slam/voxel_map` -> `/slam/bev_costmap` initial slow replay
+  Runtime `/slam/prob_voxel_map` -> `/slam/bev_costmap` initial slow replay
   baseline (`0.05 m` voxels, obstacle warn/lethal `0.02/0.20 m`,
   hard inflation): BEV f1=0.267, iou=0.154, feature_recall=0.603,
   feature_precision=0.172, feature_f1=0.267.
@@ -288,3 +296,71 @@ The older 2026-04-29 Phase 2 pass is superseded for rock validation: GT `/map`
 contained rocks, but point-instanced rocks were not reliably visible to LiDAR.
 
 Do not use `OMNILRS_GT_TF_ENABLED=false` or a SLAM-owned `map -> odom` for Phase 2 validation. That mixes GT-map goals with an independently drifting SLAM map frame. Phase 3 will plan in a SLAM-derived BEV map frame.
+
+### Phase 3 SLAM-backed Nav2
+
+Phase 3 disables simulator-owned GT `map -> odom` and lets the SLAM stack own
+the navigation frame through `glim_map -> odom`.
+
+```bash
+OMNILRS_ROCKS_ENABLED=true OMNILRS_GT_TF_ENABLED=false \
+  docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
+```
+
+Launch GLIM, probabilistic voxel mapping, BEV costmap generation, the SLAM TF
+bridge, Nav2, and `basic_control`:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase3_nav.launch.py'
+```
+
+The launch defaults to the patched LiDAR/IMU GLIM profile `glim_astrobot` with
+the IMU-frame base offset `slam_base_offset_x:=0.264`,
+`slam_base_offset_y:=0.017`, and `slam_base_yaw_offset:=pi`. The LiDAR-only
+profile `glim_astrobot_lidar_only` remains available as a fallback, but it must
+use the LiDAR-frame base offset `0.150, 0.0, 0.0`.
+
+The launch also defaults `slam_start_delay:=15.0` to keep GLIM from initializing
+while the robot is still settling. If GLIM starts with a large initial pose
+offset, Nav2 may reject all goals as outside the BEV map.
+
+Run the short Phase 3 probe smoke test:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab && source astrobot-lab/install/setup.bash && python3 tools/phase3_probe_sweep.py --goal-timeout 90 --return-home-every 2 --relative-goal 0.6,0.0 --relative-goal 0.0,0.6 --output /workspace/astrobot-lab/rosbags/phase3_probe_summary.json'
+```
+
+Send a manual SLAM-frame goal:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose "{pose: {header: {frame_id: glim_map}, pose: {position: {x: 0.6, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}}"'
+```
+
+Visualize with Foxglove fixed frame `glim_map`:
+
+```text
+/tf
+/odom
+/pointcloud/filtered
+/glim_rosnode/pose_corrected
+/glim_rosnode/aligned_points_corrected
+/slam/prob_voxel_map
+/slam/bev_costmap
+/cmd_vel_nav
+/cmd_vel
+/navigate_to_pose/_action/status
+```
+
+Current Phase 3 gate from 2026-05-17:
+
+```text
+nav_20_goal_gate_3m_lio_online_201648.json:
+  profile=glim_astrobot LiDAR/IMU
+  navigation_actions=20/20 succeeded
+  return_home=5/5 succeeded
+  endpoint_error_m min=0.085 median=0.214 p95=0.283 max=0.294
+  residual risk: controller-loop timing warnings still appear under live GLIM + mapping load
+```

@@ -31,7 +31,6 @@ setup(
             "pose_stamped_recorder = slam_eval.pose_stamped_recorder:main",
             "transform_tum = slam_eval.transform_tum:main",
             "evaluate_loop_closure = slam_eval.evaluate_loop_closure:main",
-            "bev_map_builder = slam_eval.bev_map_builder:main",
         ],
     },
 )

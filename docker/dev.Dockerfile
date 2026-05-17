@@ -51,6 +51,8 @@ RUN set -eux; \
     ldconfig; \
     rm -rf /var/lib/apt/lists/*
 
+ENV PATH=/usr/local/cuda-12.6/bin:${PATH}
+
 ENV ROS_DOMAIN_ID=177 \
     RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
     CYCLONEDDS_URI=file:///config/cyclonedds_config.xml

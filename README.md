@@ -230,7 +230,78 @@ Important Phase 2 details:
 - The packaged GLIM build does not include `libimu_validator.so`; use GLIM's built-in validation logs unless `glim_ext` is built from source.
 - Do not disable simulator GT TF or publish a SLAM-owned `map -> odom` while sending GT-map goals for Phase 2; that mixes coordinate frames and is intentionally not a supported path.
 
-### 9. Optional local GUI smoke test
+### 9. Launch Phase 3 SLAM-Backed Navigation
+
+Phase 3 moves Nav2 into the SLAM/BEV frame. The simulator still publishes GT
+topics for scoring, but simulator-owned GT `map -> odom` must be disabled to
+avoid competing TF publishers.
+
+```bash
+OMNILRS_ROCKS_ENABLED=true OMNILRS_GT_TF_ENABLED=false \
+  docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
+```
+
+Launch GLIM, the probabilistic voxel/BEV mapping chain, the SLAM-frame `glim_map -> odom`
+bridge, Nav2 Smac 2D, and `basic_control`:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase3_nav.launch.py'
+```
+
+`phase3_nav.launch.py` defaults `slam_start_delay:=15.0` so GLIM starts after
+the simulator/robot has settled. Do not remove this delay unless you have
+verified GLIM initializes near the origin; bad early initialization can put the
+robot outside the fixed BEV map extent.
+
+Phase 3 now defaults to the patched LiDAR/IMU GLIM profile `glim_astrobot`.
+The SLAM pose is treated as IMU-frame, so the launch default converts it to
+`base_link` with:
+`slam_base_offset_x:=0.264 slam_base_offset_y:=0.017 slam_base_yaw_offset:=3.141592653589793`.
+The LiDAR-only CT-ICP profile `glim_astrobot_lidar_only` remains available as a
+fallback; if using it, override the base offset back to the LiDAR-frame values:
+`slam_base_offset_x:=0.150 slam_base_offset_y:=0.0 slam_base_yaw_offset:=0.0`.
+
+Send short-horizon goals in the SLAM map frame:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose "{pose: {header: {frame_id: glim_map}, pose: {position: {x: 0.6, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}}"'
+```
+
+Or run the scripted Phase 3 probe smoke test:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab && source astrobot-lab/install/setup.bash && python3 tools/phase3_probe_sweep.py --goal-timeout 90 --return-home-every 2 --relative-goal 0.6,0.0 --relative-goal 0.0,0.6 --output /workspace/astrobot-lab/rosbags/phase3_probe_summary.json'
+```
+
+Key Phase 3 topics to visualize:
+
+- `/glim_rosnode/pose_corrected`
+- `/glim_rosnode/aligned_points_corrected`
+- `/slam/prob_voxel_map`
+- `/slam/bev_costmap`
+- `/tf`
+- `/odom`
+- `/cmd_vel_nav`
+- `/cmd_vel`
+- `/navigate_to_pose/_action/status`
+
+Use fixed frame `glim_map` in Foxglove. `/slam/prob_voxel_map` is the optional
+3D occupancy visualization with `log_odds` as a PointCloud2 field.
+`/slam/bev_costmap` is the planner-facing `nav_msgs/OccupancyGrid`.
+
+Current Phase 3 gate, validated online in rocks-enabled Lunaryard on 2026-05-17:
+
+- command output: `rosbags/phase3_gate_20260517/nav_20_goal_gate_3m_lio_online_201648.json`
+- GLIM profile: `glim_astrobot` LiDAR/IMU
+- route: 15 relative 3 m-class probes plus 5 return-home commands
+- result: `20/20` navigation actions and `5/5` return-home actions succeeded
+- endpoint error: min `0.085 m`, median `0.214 m`, p95 `0.283 m`, max `0.294 m`
+- known follow-up: runtime performance tuning, because live GLIM + mapping can make Nav2 miss its 10 Hz control loop
+
+### 10. Optional local GUI smoke test
 
 ```bash
 xhost +local:root
