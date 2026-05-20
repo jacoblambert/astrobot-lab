@@ -13,7 +13,11 @@ add_executable(pointcloud_crop_filter_node src/pointcloud_crop_filter_node.cpp)
 target_compile_features(pointcloud_crop_filter_node PUBLIC cxx_std_17)
 ament_target_dependencies(pointcloud_crop_filter_node rclcpp sensor_msgs)
 
-install(TARGETS pointcloud_crop_filter_node
+add_executable(imu_relay_node src/imu_relay_node.cpp)
+target_compile_features(imu_relay_node PUBLIC cxx_std_17)
+ament_target_dependencies(imu_relay_node rclcpp sensor_msgs)
+
+install(TARGETS pointcloud_crop_filter_node imu_relay_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

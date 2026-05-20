@@ -15,35 +15,35 @@ ros2 bag record --storage sqlite3 -o "${OUT_DIR}/bag" \
   /clock \
   /tf \
   /tf_static \
-  /pointcloud \
-  /pointcloud/filtered \
-  /imu \
-  /odom \
+  /astrobot_0/lidar_0/pointcloud/raw \
+  /astrobot_0/lidar_0/pointcloud/filtered \
+  /astrobot_0/imu \
+  /astrobot_0/odom \
   /gt/base_link_pose \
-  /map \
-  /cmd_vel \
-  /cmd_vel_nav \
-  /control/status \
-  /slam/prob_voxel_map \
-  /slam/bev_costmap \
-  /global_costmap/costmap \
-  /global_costmap/costmap_raw \
-  /local_costmap/costmap \
-  /local_costmap/costmap_raw \
-  /plan \
-  /glim_rosnode/pose \
-  /glim_rosnode/pose_corrected \
-  /glim_rosnode/odom \
-  /glim_rosnode/odom_corrected \
-  /glim_rosnode/aligned_points \
-  /glim_rosnode/aligned_points_corrected \
-  /glim_rosnode/points \
-  /glim_rosnode/points_corrected \
-  /glim_rosnode/map \
-  /navigate_to_pose/_action/status \
-  /navigate_to_pose/_action/feedback \
-  /navigate_to_pose/_action/result \
-  /navigate_to_pose/_action/goal > "${OUT_DIR}/bag_record.log" 2>&1 &
+  /gt/map \
+  /astrobot_0/cmd_vel \
+  /astrobot_0/cmd_vel_nav \
+  /astrobot_0/control/status \
+  /astrobot_0/slam/prob_voxel_map \
+  /astrobot_0/slam/bev_costmap \
+  /astrobot_0/global_costmap/costmap \
+  /astrobot_0/global_costmap/costmap_raw \
+  /astrobot_0/local_costmap/costmap \
+  /astrobot_0/local_costmap/costmap_raw \
+  /astrobot_0/plan \
+  /astrobot_0/slam/pose \
+  /astrobot_0/slam/pose_corrected \
+  /astrobot_0/slam/odom \
+  /astrobot_0/slam/odom_corrected \
+  /astrobot_0/slam/aligned_points \
+  /astrobot_0/slam/aligned_points_corrected \
+  /astrobot_0/slam/points \
+  /astrobot_0/slam/points_corrected \
+  /astrobot_0/slam/glim_map \
+  /astrobot_0/navigate_to_pose/_action/status \
+  /astrobot_0/navigate_to_pose/_action/feedback \
+  /astrobot_0/navigate_to_pose/_action/result \
+  /astrobot_0/navigate_to_pose/_action/goal > "${OUT_DIR}/bag_record.log" 2>&1 &
 BAG_PID=$!
 
 cleanup() {

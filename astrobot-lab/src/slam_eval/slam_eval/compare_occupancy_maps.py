@@ -42,8 +42,8 @@ def resample_to_gt(gt: OccupancyGrid, pred: OccupancyGrid) -> tuple[np.ndarray, 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--bag", required=True)
-    parser.add_argument("--gt-topic", default="/map")
-    parser.add_argument("--pred-topic", default="/slam/bev_costmap")
+    parser.add_argument("--gt-topic", default="/gt/map")
+    parser.add_argument("--pred-topic", default="/astrobot_0/slam/bev_costmap")
     parser.add_argument("--gt-occupied-threshold", type=int, default=50)
     parser.add_argument("--pred-occupied-threshold", type=int, default=50)
     parser.add_argument("--dilation-radius", type=int, default=2)

@@ -1,9 +1,9 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo, TimerAction
+from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, LogInfo, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
-from launch_ros.actions import Node
+from launch_ros.actions import Node, PushRosNamespace
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
@@ -20,10 +20,12 @@ def generate_launch_description() -> LaunchDescription:
     slam_base_offset_x = LaunchConfiguration("slam_base_offset_x")
     slam_base_offset_y = LaunchConfiguration("slam_base_offset_y")
     slam_base_yaw_offset = LaunchConfiguration("slam_base_yaw_offset")
+    robot_namespace = LaunchConfiguration("robot_namespace")
 
     return LaunchDescription(
         [
             DeclareLaunchArgument("use_sim_time", default_value="true"),
+            DeclareLaunchArgument("robot_namespace", default_value="astrobot_0"),
             DeclareLaunchArgument("autostart", default_value="true"),
             DeclareLaunchArgument("start_nav2", default_value="true"),
             DeclareLaunchArgument("start_slam_tf", default_value="true"),
@@ -74,6 +76,7 @@ def generate_launch_description() -> LaunchDescription:
                         ),
                         launch_arguments={
                             "use_sim_time": use_sim_time,
+                            "robot_namespace": robot_namespace,
                             "glim_config_path": glim_config_path,
                             "voxel_size": "0.10",
                             "crop_min_x": LaunchConfiguration("crop_min_x"),
@@ -84,26 +87,31 @@ def generate_launch_description() -> LaunchDescription:
                             "crop_max_z": LaunchConfiguration("crop_max_z"),
                         }.items(),
                     ),
-                    Node(
-                        package="slam_mapping",
-                        executable="slam_map_to_odom_tf_node",
-                        name="slam_map_to_odom_tf",
-                        output="screen",
-                        condition=IfCondition(start_slam_tf),
-                        parameters=[
-                            {
-                                "use_sim_time": use_sim_time,
-                                "slam_pose_topic": "/glim_rosnode/pose_corrected",
-                                "odom_topic": "/odom",
-                                "map_frame": "glim_map",
-                                "odom_frame": "odom",
-                                "base_frame": "base_link",
-                                "base_offset_x": ParameterValue(slam_base_offset_x, value_type=float),
-                                "base_offset_y": ParameterValue(slam_base_offset_y, value_type=float),
-                                "base_yaw_offset": ParameterValue(slam_base_yaw_offset, value_type=float),
-                                "publish_rate_hz": 30.0,
-                            }
-                        ],
+                    GroupAction(
+                        [
+                            PushRosNamespace(robot_namespace),
+                            Node(
+                                package="slam_mapping",
+                                executable="slam_map_to_odom_tf_node",
+                                name="slam_map_to_odom_tf",
+                                output="screen",
+                                condition=IfCondition(start_slam_tf),
+                                parameters=[
+                                    {
+                                        "use_sim_time": use_sim_time,
+                                        "slam_pose_topic": "slam/pose_corrected",
+                                        "odom_topic": "odom",
+                                        "map_frame": "map",
+                                        "odom_frame": "odom",
+                                        "base_frame": "base_link",
+                                        "base_offset_x": ParameterValue(slam_base_offset_x, value_type=float),
+                                        "base_offset_y": ParameterValue(slam_base_offset_y, value_type=float),
+                                        "base_yaw_offset": ParameterValue(slam_base_yaw_offset, value_type=float),
+                                        "publish_rate_hz": 30.0,
+                                    }
+                                ],
+                            ),
+                        ]
                     ),
                     IncludeLaunchDescription(
                         PythonLaunchDescriptionSource(
@@ -116,6 +124,7 @@ def generate_launch_description() -> LaunchDescription:
                         condition=IfCondition(start_nav2),
                         launch_arguments={
                             "use_sim_time": use_sim_time,
+                            "robot_namespace": robot_namespace,
                             "autostart": autostart,
                             "nav2_params": nav2_params,
                             "basic_control_params": basic_control_params,

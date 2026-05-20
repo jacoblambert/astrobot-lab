@@ -52,11 +52,11 @@ public:
     map_(read_occupancy_config()),
     bev_config_(read_bev_config())
   {
-    input_topic_ = declare_parameter<std::string>("input_topic", "/glim_rosnode/aligned_points_corrected");
-    pose_topic_ = declare_parameter<std::string>("pose_topic", "/glim_rosnode/pose_corrected");
-    voxel_output_topic_ = declare_parameter<std::string>("voxel_output_topic", "/slam/prob_voxel_map");
-    costmap_output_topic_ = declare_parameter<std::string>("costmap_output_topic", "/slam/bev_costmap");
-    frame_id_ = declare_parameter<std::string>("frame_id", "glim_map");
+    input_topic_ = declare_parameter<std::string>("input_topic", "slam/aligned_points_corrected");
+    pose_topic_ = declare_parameter<std::string>("pose_topic", "slam/pose_corrected");
+    voxel_output_topic_ = declare_parameter<std::string>("voxel_output_topic", "slam/prob_voxel_map");
+    costmap_output_topic_ = declare_parameter<std::string>("costmap_output_topic", "slam/bev_costmap");
+    frame_id_ = declare_parameter<std::string>("frame_id", "map");
     publish_rate_hz_ = declare_parameter<double>("publish_rate_hz", 2.0);
     publish_voxel_map_ = declare_parameter<bool>("publish_voxel_map", true);
     clear_on_frame_change_ = declare_parameter<bool>("clear_on_frame_change", false);

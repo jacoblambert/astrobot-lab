@@ -19,8 +19,8 @@ public:
   PointCloudCropFilterNode()
   : Node("pointcloud_crop_filter")
   {
-    input_topic_ = declare_parameter<std::string>("input_topic", "/pointcloud");
-    output_topic_ = declare_parameter<std::string>("output_topic", "/pointcloud/filtered");
+    input_topic_ = declare_parameter<std::string>("input_topic", "lidar_0/pointcloud/raw");
+    output_topic_ = declare_parameter<std::string>("output_topic", "lidar_0/pointcloud/filtered");
     min_x_ = declare_parameter<double>("min_x", 0.20);
     max_x_ = declare_parameter<double>("max_x", 0.80);
     min_y_ = declare_parameter<double>("min_y", -0.45);

@@ -242,8 +242,8 @@ def compare_bev(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--bag", required=True, help="Path to rosbag directory.")
-    parser.add_argument("--gt-map-topic", default="/map")
-    parser.add_argument("--glim-map-topic", default="/glim_rosnode/map")
+    parser.add_argument("--gt-map-topic", default="/gt/map")
+    parser.add_argument("--glim-map-topic", default="/astrobot_0/slam/glim_map")
     parser.add_argument("--reference-tum", help="GT TUM trajectory used to align GLIM map.")
     parser.add_argument("--estimate-tum", help="GLIM TUM trajectory used to align GLIM map.")
     parser.add_argument("--align", choices=["none", "first", "yaw"], default="first")

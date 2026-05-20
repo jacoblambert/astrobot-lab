@@ -112,33 +112,33 @@ echo "Recording Phase 2 bag to ${OUT_DIR}"
 ros2 run slam_eval pose_stamped_recorder --topic "${GT_POSE_TOPIC}" --output "${GT_TUM}" --ros-args -p use_sim_time:=true &
 GT_PID=$!
 
-ros2 run slam_eval pose_stamped_recorder --topic /glim_rosnode/pose --output "${GLIM_TUM}" --ros-args -p use_sim_time:=true &
+ros2 run slam_eval pose_stamped_recorder --topic /astrobot_0/slam/pose --output "${GLIM_TUM}" --ros-args -p use_sim_time:=true &
 GLIM_PID=$!
 
-ros2 run slam_eval pose_stamped_recorder --topic /glim_rosnode/pose_corrected --output "${GLIM_CORRECTED_TUM}" --ros-args -p use_sim_time:=true &
+ros2 run slam_eval pose_stamped_recorder --topic /astrobot_0/slam/pose_corrected --output "${GLIM_CORRECTED_TUM}" --ros-args -p use_sim_time:=true &
 GLIM_CORRECTED_PID=$!
 
 ros2 bag record --storage sqlite3 -o "${OUT_DIR}/bag" \
-  /pointcloud \
-  /pointcloud/filtered \
-  /imu \
-  /odom \
+  /astrobot_0/lidar_0/pointcloud/raw \
+  /astrobot_0/lidar_0/pointcloud/filtered \
+  /astrobot_0/imu \
+  /astrobot_0/odom \
   /tf \
   /tf_static \
-  /map \
+  /gt/map \
   "${GT_POSE_TOPIC}" \
   /clock \
-  /cmd_vel \
-  /cmd_vel_nav \
-  /control/status \
-  /glim_rosnode/pose \
-  /glim_rosnode/pose_corrected \
-  /glim_rosnode/odom \
-  /glim_rosnode/odom_corrected \
-  /glim_rosnode/aligned_points_corrected \
-  /glim_rosnode/points_corrected \
-  /glim_rosnode/map \
-  /navigate_to_pose/_action/status &
+  /astrobot_0/cmd_vel \
+  /astrobot_0/cmd_vel_nav \
+  /astrobot_0/control/status \
+  /astrobot_0/slam/pose \
+  /astrobot_0/slam/pose_corrected \
+  /astrobot_0/slam/odom \
+  /astrobot_0/slam/odom_corrected \
+  /astrobot_0/slam/aligned_points_corrected \
+  /astrobot_0/slam/points_corrected \
+  /astrobot_0/slam/glim_map \
+  /astrobot_0/navigate_to_pose/_action/status &
 BAG_PID=$!
 
 cleanup() {

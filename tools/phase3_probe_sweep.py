@@ -145,9 +145,9 @@ def parse_relative_goal(value: str) -> Pose2D:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pose-topic", default="/glim_rosnode/pose_corrected")
-    parser.add_argument("--action-name", default="/navigate_to_pose")
-    parser.add_argument("--frame-id", default="glim_map")
+    parser.add_argument("--pose-topic", default="/astrobot_0/slam/pose_corrected")
+    parser.add_argument("--action-name", default="/astrobot_0/navigate_to_pose")
+    parser.add_argument("--frame-id", default="map")
     parser.add_argument("--server-timeout", type=float, default=30.0)
     parser.add_argument("--goal-timeout", type=float, default=120.0)
     parser.add_argument("--pose-timeout", type=float, default=30.0)

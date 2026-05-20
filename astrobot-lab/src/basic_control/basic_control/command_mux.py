@@ -50,13 +50,13 @@ class CommandMux(Node):
         self._last_output = Twist()
         self._last_publish_time = time.monotonic()
 
-        self.cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
-        self.status_pub = self.create_publisher(DiagnosticArray, "/control/status", 10)
+        self.cmd_pub = self.create_publisher(Twist, "cmd_vel", 10)
+        self.status_pub = self.create_publisher(DiagnosticArray, "control/status", 10)
 
-        self.create_subscription(Twist, "/cmd_vel_nav", self._nav_callback, 10)
-        self.create_subscription(Twist, "/cmd_vel_teleop", self._teleop_callback, 10)
-        self.create_subscription(Bool, "/control/estop", self._estop_callback, 10)
-        self.create_subscription(String, "/control/mode", self._mode_callback, 10)
+        self.create_subscription(Twist, "cmd_vel_nav", self._nav_callback, 10)
+        self.create_subscription(Twist, "cmd_vel_teleop", self._teleop_callback, 10)
+        self.create_subscription(Bool, "control/estop", self._estop_callback, 10)
+        self.create_subscription(String, "control/mode", self._mode_callback, 10)
 
         self.create_timer(1.0 / max(self.publish_rate_hz, 1.0), self._publish_loop)
         self.create_timer(1.0, self._publish_status)

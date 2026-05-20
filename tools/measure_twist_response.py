@@ -45,11 +45,11 @@ class TwistProbe(Node):
         self.odom_msg: Optional[Odometry] = None
         self.tf_msgs = []
         self.tf_static_msgs = []
-        self.create_subscription(Odometry, "/odom", self._odom_cb, 50)
+        self.create_subscription(Odometry, "/astrobot_0/odom", self._odom_cb, 50)
         self.create_subscription(TFMessage, "/tf", self._tf_cb, 200)
         self.create_subscription(TFMessage, "/tf_static", self._tf_static_cb, 50)
-        self.mode_pub = self.create_publisher(String, "/control/mode", 10)
-        self.cmd_pub = self.create_publisher(Twist, "/cmd_vel_teleop", 10)
+        self.mode_pub = self.create_publisher(String, "/astrobot_0/control/mode", 10)
+        self.cmd_pub = self.create_publisher(Twist, "/astrobot_0/cmd_vel_teleop", 10)
 
     def _odom_cb(self, msg: Odometry) -> None:
         self.odom_msg = msg
@@ -71,14 +71,14 @@ class TwistProbe(Node):
         deadline = time.time() + timeout_sec
         while time.time() < deadline:
             rclpy.spin_once(self, timeout_sec=0.1)
-            if self.odom_msg is not None and self.latest_transform("map", "odom"):
+            if self.odom_msg is not None and self.latest_transform("gt_map", "odom"):
                 return
-        raise RuntimeError("timed out waiting for map->odom and /odom")
+        raise RuntimeError("timed out waiting for gt_map->odom and /astrobot_0/odom")
 
     def current_pose_in_map(self) -> Pose2D:
-        map_to_odom = self.latest_transform("map", "odom")
+        map_to_odom = self.latest_transform("gt_map", "odom")
         if map_to_odom is None or self.odom_msg is None:
-            raise RuntimeError("missing map->odom transform or /odom")
+            raise RuntimeError("missing gt_map->odom transform or /astrobot_0/odom")
 
         p1 = Pose2D(
             x=map_to_odom.transform.translation.x,

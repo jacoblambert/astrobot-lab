@@ -52,13 +52,13 @@ class GoalSweepNode(Node):
         self.pose_topic = pose_topic
         self.tf_msgs = []
         self.tf_static_msgs = []
-        self.map_sub = self.create_subscription(OccupancyGrid, "/map", self._map_cb, 10)
-        self.odom_sub = self.create_subscription(Odometry, "/odom", self._odom_cb, 50)
+        self.map_sub = self.create_subscription(OccupancyGrid, "/gt/map", self._map_cb, 10)
+        self.odom_sub = self.create_subscription(Odometry, "/astrobot_0/odom", self._odom_cb, 50)
         if self.pose_topic:
             self.pose_sub = self.create_subscription(PoseStamped, self.pose_topic, self._pose_cb, 50)
         self.tf_sub = self.create_subscription(TFMessage, "/tf", self._tf_cb, 100)
         self.tf_static_sub = self.create_subscription(TFMessage, "/tf_static", self._tf_static_cb, 100)
-        self.nav_client = ActionClient(self, NavigateToPose, "/navigate_to_pose")
+        self.nav_client = ActionClient(self, NavigateToPose, "/astrobot_0/navigate_to_pose")
 
     def _map_cb(self, msg: OccupancyGrid) -> None:
         self.map_msg = msg
@@ -90,9 +90,9 @@ class GoalSweepNode(Node):
                 yaw=yaw_from_quaternion(self.pose_msg.pose.orientation),
             )
 
-        map_to_odom = self.latest_transform("map", "odom")
+        map_to_odom = self.latest_transform("gt_map", "odom")
         if map_to_odom is None or self.odom_msg is None:
-            raise RuntimeError("missing map->odom transform or /odom")
+            raise RuntimeError("missing gt_map->odom transform or /astrobot_0/odom")
         p1 = Pose2D(
             x=map_to_odom.transform.translation.x,
             y=map_to_odom.transform.translation.y,
@@ -185,7 +185,7 @@ class GoalSweepNode(Node):
         while time.time() < deadline:
             rclpy.spin_once(self, timeout_sec=0.1)
             has_pose_source = self.pose_msg is not None or (
-                self.odom_msg is not None and self.latest_transform("map", "odom")
+                self.odom_msg is not None and self.latest_transform("gt_map", "odom")
             )
             if self.map_msg is not None and has_pose_source:
                 return
@@ -197,7 +197,7 @@ class GoalSweepNode(Node):
 
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose = PoseStamped()
-        goal_msg.pose.header.frame_id = "map"
+        goal_msg.pose.header.frame_id = "gt_map"
         goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
         goal_msg.pose.pose.position.x = x
         goal_msg.pose.pose.position.y = y
@@ -227,8 +227,8 @@ class GoalSweepNode(Node):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeout", type=float, default=45.0)
-    parser.add_argument("--auto-free", type=int, default=0, help="Sample this many free-space goals from /map.")
-    parser.add_argument("--auto-occupied", type=int, default=0, help="Sample this many occupied goals from /map.")
+    parser.add_argument("--auto-free", type=int, default=0, help="Sample this many free-space goals from /gt/map.")
+    parser.add_argument("--auto-occupied", type=int, default=0, help="Sample this many occupied goals from /gt/map.")
     parser.add_argument("--min-distance", type=float, default=1.0)
     parser.add_argument("--max-distance", type=float, default=8.0)
     parser.add_argument("--clearance", type=float, default=0.35, help="Required free radius around auto-free goals.")
@@ -238,7 +238,7 @@ def main() -> int:
     parser.add_argument(
         "--pose-topic",
         default=None,
-        help="Optional PoseStamped topic in map frame for route start and endpoint evaluation, e.g. /gt/base_link_pose.",
+        help="Optional PoseStamped topic in gt_map frame for route start and endpoint evaluation, e.g. /gt/base_link_pose.",
     )
     parser.add_argument(
         "--relative-goals",

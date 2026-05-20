@@ -33,32 +33,32 @@ GLIM_LAUNCH_PID=$!
 sleep 8
 
 ros2 run slam_eval pose_stamped_recorder \
-  --topic /glim_rosnode/pose \
+  --topic /astrobot_0/slam/pose \
   --output "${OUT_DIR}/glim_pose.tum" \
   --ros-args -p use_sim_time:=true > "${OUT_DIR}/pose_recorder.log" 2>&1 &
 RAW_PID=$!
 
 ros2 run slam_eval pose_stamped_recorder \
-  --topic /glim_rosnode/pose_corrected \
+  --topic /astrobot_0/slam/pose_corrected \
   --output "${OUT_DIR}/glim_pose_corrected.tum" \
   --ros-args -p use_sim_time:=true > "${OUT_DIR}/pose_corrected_recorder.log" 2>&1 &
 CORR_PID=$!
 
 ros2 bag record --storage sqlite3 -o "${EVAL_BAG}" \
-  /map \
-  /pointcloud/filtered \
-  /glim_rosnode/aligned_points_corrected \
-  /glim_rosnode/points_corrected \
-  /glim_rosnode/map \
-  /glim_rosnode/pose \
-  /glim_rosnode/pose_corrected \
+  /gt/map \
+  /astrobot_0/lidar_0/pointcloud/filtered \
+  /astrobot_0/slam/aligned_points_corrected \
+  /astrobot_0/slam/points_corrected \
+  /astrobot_0/slam/glim_map \
+  /astrobot_0/slam/pose \
+  /astrobot_0/slam/pose_corrected \
   /tf \
   /tf_static \
   /clock > "${OUT_DIR}/bag_record.log" 2>&1 &
 BAG_RECORD_PID=$!
 
 sleep 3
-ros2 bag play "${SRC_DIR}/bag" --topics /clock /map /imu /pointcloud --rate "${RATE}" > "${OUT_DIR}/bag_play.log" 2>&1
+ros2 bag play "${SRC_DIR}/bag" --topics /clock /gt/map /astrobot_0/imu /astrobot_0/lidar_0/pointcloud/raw --rate "${RATE}" > "${OUT_DIR}/bag_play.log" 2>&1
 sleep 8
 
 cleanup
@@ -123,7 +123,7 @@ ros2 run slam_eval compare_bev_maps \
 
 ros2 run slam_eval analyze_pointcloud_height \
   --bag "${EVAL_BAG}" \
-  --topics /pointcloud/filtered /glim_rosnode/aligned_points_corrected /glim_rosnode/map \
+  --topics /astrobot_0/lidar_0/pointcloud/filtered /astrobot_0/slam/aligned_points_corrected /astrobot_0/slam/glim_map \
   --cell-size 0.5 \
   --max-radius 15.0 \
   --min-points-per-cell 4 | tee "${OUT_DIR}/pointcloud_height_metrics.json"

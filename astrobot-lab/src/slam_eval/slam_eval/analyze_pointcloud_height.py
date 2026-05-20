@@ -67,7 +67,15 @@ def local_height_stats(points: np.ndarray, cell_size: float, max_radius: float, 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--bag", required=True, help="Path to rosbag directory.")
-    parser.add_argument("--topics", nargs="+", default=["/pointcloud", "/pointcloud/filtered", "/glim_rosnode/map"])
+    parser.add_argument(
+        "--topics",
+        nargs="+",
+        default=[
+            "/astrobot_0/lidar_0/pointcloud/raw",
+            "/astrobot_0/lidar_0/pointcloud/filtered",
+            "/astrobot_0/slam/glim_map",
+        ],
+    )
     parser.add_argument("--cell-size", type=float, default=0.5)
     parser.add_argument("--max-radius", type=float, default=15.0)
     parser.add_argument("--min-points-per-cell", type=int, default=4)

@@ -40,7 +40,7 @@ class PoseStampedRecorder(Node):
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--topic", default="/glim_rosnode/pose", help="PoseStamped topic to record.")
+    parser.add_argument("--topic", default="/astrobot_0/slam/pose", help="PoseStamped topic to record.")
     parser.add_argument("--output", required=True, help="Output TUM trajectory path.")
     args = parser.parse_args(remove_ros_args()[1:])
 

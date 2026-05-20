@@ -1,9 +1,9 @@
 bt_navigator:
   ros__parameters:
     use_sim_time: true
-    global_frame: glim_map
+    global_frame: map
     robot_base_frame: base_link
-    odom_topic: /odom
+    odom_topic: odom
     bt_loop_duration: 20
     default_server_timeout: 20
     wait_for_service_timeout: 1000
@@ -122,7 +122,7 @@ global_costmap:
   global_costmap:
     ros__parameters:
       use_sim_time: true
-      global_frame: glim_map
+      global_frame: map
       robot_base_frame: base_link
       update_frequency: 2.0
       publish_frequency: 1.0
@@ -135,7 +135,7 @@ global_costmap:
       plugins: ["static_layer", "inflation_layer"]
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
-        map_topic: /slam/bev_costmap
+        map_topic: /astrobot_0/slam/bev_costmap
         map_subscribe_transient_local: false
         trinary_costmap: false
         lethal_cost_threshold: 100
@@ -165,7 +165,7 @@ local_costmap:
       plugins: ["static_layer", "inflation_layer"]
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
-        map_topic: /slam/bev_costmap
+        map_topic: /astrobot_0/slam/bev_costmap
         map_subscribe_transient_local: false
         trinary_costmap: false
         lethal_cost_threshold: 100

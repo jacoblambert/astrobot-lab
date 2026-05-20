@@ -25,9 +25,9 @@ public:
   SlamMapToOdomTfNode()
   : Node("slam_map_to_odom_tf")
   {
-    slam_pose_topic_ = declare_parameter<std::string>("slam_pose_topic", "/glim_rosnode/pose_corrected");
-    odom_topic_ = declare_parameter<std::string>("odom_topic", "/odom");
-    map_frame_ = declare_parameter<std::string>("map_frame", "glim_map");
+    slam_pose_topic_ = declare_parameter<std::string>("slam_pose_topic", "slam/pose_corrected");
+    odom_topic_ = declare_parameter<std::string>("odom_topic", "odom");
+    map_frame_ = declare_parameter<std::string>("map_frame", "map");
     odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");
     base_frame_ = declare_parameter<std::string>("base_frame", "base_link");
     base_offset_x_ = declare_parameter<double>("base_offset_x", 0.264);

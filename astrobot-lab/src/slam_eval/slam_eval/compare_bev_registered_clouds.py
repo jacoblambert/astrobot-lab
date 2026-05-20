@@ -166,9 +166,9 @@ def read_registered_cloud(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--bag", required=True, help="Path to rosbag directory.")
-    parser.add_argument("--gt-map-topic", default="/map")
-    parser.add_argument("--cloud-topic", default="/glim_rosnode/points_corrected")
-    parser.add_argument("--pose-topic", default="/glim_rosnode/pose_corrected")
+    parser.add_argument("--gt-map-topic", default="/gt/map")
+    parser.add_argument("--cloud-topic", default="/astrobot_0/slam/points_corrected")
+    parser.add_argument("--pose-topic", default="/astrobot_0/slam/pose_corrected")
     parser.add_argument("--reference-tum", help="GT TUM trajectory used to align GLIM map.")
     parser.add_argument("--estimate-tum", help="GLIM TUM trajectory used to align GLIM map.")
     parser.add_argument("--align", choices=["none", "first", "yaw"], default="first")
