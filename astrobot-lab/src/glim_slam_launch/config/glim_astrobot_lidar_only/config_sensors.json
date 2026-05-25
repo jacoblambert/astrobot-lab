@@ -5,7 +5,7 @@
     "imu_int_noise": 0.001,
     "imu_bias_noise": 0.00001,
     "global_shutter_lidar": true,
-    "T_lidar_imu": [0.414, 0.017, 0.153, 0.0, 0.0, 1.0, 0.0],
+    "T_lidar_imu": [0.414, 0.017, -0.153, 0.0, 0.0, 1.0, 0.0],
     "intensity_field": "",
     "ring_field": "",
     "autoconf_perpoint_times": false,

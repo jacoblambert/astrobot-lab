@@ -4,6 +4,7 @@ set -euo pipefail
 ENVIRONMENT_NAME="${OMNILRS_ENVIRONMENT:-lunaryard_40m}"
 HEADLESS_RAW="${OMNILRS_HEADLESS:-true}"
 ROCKS_RAW="${OMNILRS_ROCKS_ENABLED:-}"
+ENVIRONMENT_SEED="${OMNILRS_ENVIRONMENT_SEED:-}"
 
 case "${HEADLESS_RAW,,}" in
   true|1|yes|on)
@@ -68,6 +69,14 @@ if [[ -n "${ROCKS_OVERRIDE}" ]]; then
   ARGS+=("++environment.rocks_settings.enable=${ROCKS_OVERRIDE}")
 fi
 
-echo "Starting OmniLRS environment='${ENVIRONMENT_NAME}' headless='${HEADLESS_OVERRIDE}' rocks='${ROCKS_OVERRIDE:-default}' display='${DISPLAY:-}'"
+if [[ -n "${ENVIRONMENT_SEED}" ]]; then
+  if ! [[ "${ENVIRONMENT_SEED}" =~ ^[0-9]+$ ]] || [[ "${ENVIRONMENT_SEED}" -le 0 ]]; then
+    echo "Invalid OMNILRS_ENVIRONMENT_SEED='${ENVIRONMENT_SEED}'. Use a positive integer." >&2
+    exit 2
+  fi
+  ARGS+=("++environment.seed=${ENVIRONMENT_SEED}")
+fi
+
+echo "Starting OmniLRS environment='${ENVIRONMENT_NAME}' headless='${HEADLESS_OVERRIDE}' rocks='${ROCKS_OVERRIDE:-default}' seed='${ENVIRONMENT_SEED:-config}' display='${DISPLAY:-}'"
 
 exec /isaac-sim/python.sh /workspace/omnilrs/run.py "${ARGS[@]}"

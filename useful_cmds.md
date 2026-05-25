@@ -368,3 +368,89 @@ nav_20_goal_gate_3m_lio_online_201648.json:
   endpoint_error_m min=0.085 median=0.214 p95=0.283 max=0.294
   residual risk: controller-loop timing warnings still appear under live GLIM + mapping load
 ```
+
+### Phase 4 resource-aware exploration
+
+Start deterministic resources for smoke testing:
+
+```bash
+OMNILRS_ROCKS_ENABLED=true OMNILRS_GT_TF_ENABLED=false OMNILRS_RESOURCE_MODE=deterministic \
+  docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
+```
+
+Start randomized multi-Gaussian resources for gate-style runs:
+
+```bash
+OMNILRS_ROCKS_ENABLED=true OMNILRS_GT_TF_ENABLED=false OMNILRS_RESOURCE_MODE=random OMNILRS_RESOURCE_SEED=1001 \
+  docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
+```
+
+Launch Phase 4 exploration:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase4_exploration.launch.py mission_mode:=sample_return sample_success_threshold:=0.75'
+```
+
+Run the current hard seeded sample-return check:
+
+```bash
+OMNILRS_ROCKS_ENABLED=true OMNILRS_ENVIRONMENT_SEED=411 OMNILRS_GT_TF_ENABLED=false \
+OMNILRS_RESOURCE_ENABLED=true OMNILRS_RESOURCE_MODE=random OMNILRS_RESOURCE_SEED=20260611 \
+OMNILRS_RESOURCE_RANDOM_GAUSSIANS=8 OMNILRS_RESOURCE_RANDOM_SIGMA_MIN=5.0 OMNILRS_RESOURCE_RANDOM_SIGMA_MAX=10.0 \
+docker compose -f docker-compose.lunaryard.yml up -d --force-recreate astrobot-dev astrobot-sim
+
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase4_exploration.launch.py mission_mode:=sample_return sample_success_threshold:=0.80 home_radius_m:=12.0 max_goal_distance_m:=8.0 resource_weight_scale:=7.0 resource_influence_radius_m:=5.0 resource_decay_radius_m:=2.0 max_resource_candidates:=30 resource_explore_radius_m:=4.0 mission_cell_size_m:=2.0 exploration_start_delay:=35.0'
+```
+
+Expected reference from `rosbags/phase4_abundant_sample_return_hard_seed411_20260525_212515`:
+
+```text
+best_sample=0.826
+return_home=succeeded
+nav2_failures=0
+safety_cancellations=0
+slam_jumps=0
+max_slam_vs_gt_error=0.631 m
+```
+
+Run the current 8 m / 80% explore-radius check:
+
+```bash
+OMNILRS_ROCKS_ENABLED=true OMNILRS_ENVIRONMENT_SEED=411 OMNILRS_GT_TF_ENABLED=false \
+OMNILRS_RESOURCE_ENABLED=true OMNILRS_RESOURCE_MODE=random OMNILRS_RESOURCE_SEED=20260611 \
+docker compose -f docker-compose.lunaryard.yml up -d --force-recreate astrobot-dev astrobot-sim
+
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase4_exploration.launch.py mission_mode:=explore_radius coverage_goal_fraction:=0.80 home_radius_m:=8.0 max_goal_distance_m:=8.0 mission_cell_size_m:=2.0 mission_candidate_limit:=120 exploration_start_delay:=35.0'
+```
+
+Expected reference from `rosbags/phase4_abundant_gate80_radius8_candidate_fix_20260524_232015`:
+
+```text
+coverage=42/52=80.77%
+nav2_failures=0
+slam_jumps=0
+note=coverage gate only; return-home was stopped after threshold to avoid a long breadcrumb tail
+```
+
+Monitor a run:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab && source astrobot-lab/install/setup.bash && python3 tools/phase4_exploration_eval.py --duration 900 --output /workspace/astrobot-lab/rosbags/phase4_summary.json'
+```
+
+Foxglove topics:
+
+```text
+/gt/resource_maps/water
+/astrobot_0/resource/water/sample
+/astrobot_0/resource/water/sample_pose
+/astrobot_0/exploration/frontiers
+/astrobot_0/exploration/selected_goal
+/astrobot_0/exploration/status
+/astrobot_0/exploration/mission_grid
+/astrobot_0/diagnostics
+```

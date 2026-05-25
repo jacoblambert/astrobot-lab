@@ -61,15 +61,15 @@ controller_server:
     general_goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
       stateful: true
-      xy_goal_tolerance: 0.20
+      xy_goal_tolerance: 0.50
       yaw_goal_tolerance: 6.28
     FollowPath:
       plugin: "nav2_rotation_shim_controller::RotationShimController"
       primary_controller: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      angular_dist_threshold: 0.50
+      angular_dist_threshold: 0.85
       forward_sampling_distance: 0.35
-      rotate_to_heading_angular_vel: 0.22
-      max_angular_accel: 0.35
+      rotate_to_heading_angular_vel: 0.35
+      max_angular_accel: 0.80
       simulate_ahead_time: 0.5
       rotate_to_goal_heading: false
       rotate_to_heading_once: false
@@ -81,8 +81,8 @@ controller_server:
       lookahead_time: 1.5
       use_velocity_scaled_lookahead_dist: true
       transform_tolerance: 0.2
-      min_approach_linear_velocity: 0.06
-      approach_velocity_scaling_dist: 0.60
+      min_approach_linear_velocity: 0.08
+      approach_velocity_scaling_dist: 0.45
       use_regulated_linear_velocity_scaling: true
       use_cost_regulated_linear_velocity_scaling: false
       cost_scaling_dist: 0.80

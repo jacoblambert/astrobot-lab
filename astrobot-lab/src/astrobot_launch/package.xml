@@ -21,6 +21,8 @@
   <exec_depend>nav2_regulated_pure_pursuit_controller</exec_depend>
   <exec_depend>nav2_smac_planner</exec_depend>
   <exec_depend>glim_slam_launch</exec_depend>
+  <exec_depend>exploration_manager</exec_depend>
+  <exec_depend>astrobot_diagnostics</exec_depend>
   <exec_depend>pointcloud_preprocessor</exec_depend>
   <exec_depend>slam_mapping</exec_depend>
   <exec_depend>slam_eval</exec_depend>

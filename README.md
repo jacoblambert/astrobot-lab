@@ -225,7 +225,8 @@ Important Phase 2 details:
 - GLIM keeps raw points in its map output for visualization. Current mapping config reduces GLIM preprocessing/downsampling to preserve rock geometry (`downsample_resolution=0.25`, submap/global voxel resolution `0.25`).
 - `tools/record_phase2_bag.sh` records true simulator pose from `/gt/base_link_pose`.
 - Direct live-recorded TUM evaluation is currently the authoritative path. `ros2 bag play` replay can shift `/clock` on some recordings, which breaks timestamp matching for replay-generated GLIM poses.
-- GLIM `T_lidar_imu` is IMU-frame to LiDAR-frame; the current config uses simulator TF `vlp16 <- Imu_Sensor = [0.414, 0.017, 0.153, 0, 0, 1, 0]`.
+- GLIM `T_lidar_imu` is IMU-frame to LiDAR-frame; the current config uses simulator TF `vlp16 <- Imu_Sensor = [0.414, 0.017, -0.153, 0, 0, 1, 0]`.
+- 2026-05-24 Phase 4 failure isolation found the previous `+0.153` z sign caused GLIM's repeated IMU-prediction warnings and sudden multi-meter pose jumps during yaw-heavy exploration.
 - GLIM ROS pose is treated as IMU-frame for metric conversion; `slam_eval transform_tum` converts it to base-frame with `[0.264, 0.017, -0.262, yaw=pi]`.
 - For live Foxglove viewing, use fixed frame `map` and start with `/astrobot_0/slam/aligned_points_corrected`; `/astrobot_0/slam/glim_map` is GLIM's global-map PointCloud2 output and may update less continuously than the aligned local/submap cloud.
 - The packaged GLIM build does not include `libimu_validator.so`; use GLIM's built-in validation logs unless `glim_ext` is built from source.
@@ -303,7 +304,72 @@ Current Phase 3 gate, validated online in rocks-enabled Lunaryard on 2026-05-17:
 - endpoint error: min `0.085 m`, median `0.214 m`, p95 `0.283 m`, max `0.294 m`
 - known follow-up: runtime performance tuning, because live GLIM + mapping can make Nav2 miss its 10 Hz control loop
 
-### 10. Optional local GUI smoke test
+### 10. Launch Phase 4 resource-aware exploration
+
+Phase 4 adds autonomous single-robot frontier exploration on top of Phase 3. It
+also publishes simulator-owned resource truth maps for scoring/visualization and
+entered-cell resource samples for autonomy.
+
+Deterministic resource smoke run:
+
+```bash
+OMNILRS_ROCKS_ENABLED=true OMNILRS_GT_TF_ENABLED=false OMNILRS_RESOURCE_MODE=deterministic \
+  docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
+
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase4_exploration.launch.py mission_mode:=explore_radius'
+```
+
+Randomized resource gate-style run:
+
+```bash
+OMNILRS_ROCKS_ENABLED=true OMNILRS_GT_TF_ENABLED=false OMNILRS_RESOURCE_MODE=random OMNILRS_RESOURCE_SEED=1001 \
+  docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
+```
+
+Use `mission_mode:=sample_return` to stop once the robot enters a cell with a
+sample above `sample_success_threshold`.
+
+Current Phase 4 status:
+- `exploration_manager` is the active autonomous goal selector.
+- The planner does not consume the full GT resource map. It only consumes entered-cell samples from `/astrobot_0/resource/water/sample`.
+- GT resource maps under `/gt/resource_maps/water` are for visualization and evaluation.
+- `explore_radius` has a partial gate pass on an 8 m radius / 2 m mission grid:
+  - run: `rosbags/phase4_abundant_gate80_radius8_candidate_fix_20260524_232015`
+  - result: `42/52 = 80.77%` reachable mission cells covered
+  - Nav2 failures: `0`
+  - SLAM jumps: `0`
+  - note: return-home was stopped after proving the coverage threshold to avoid a long breadcrumb tail
+- `sample_return` has a hard seeded pass:
+  - run: `rosbags/phase4_abundant_sample_return_hard_seed411_20260525_212515`
+  - threshold: `0.80`
+  - best sample: `0.826`
+  - return home: succeeded
+  - Nav2 failures: `0`
+  - SLAM jumps: `0`
+
+Known Phase 4 limitations:
+- The full statistical gate of `3` randomized `explore_radius` and `3` randomized `sample_return` runs is not complete.
+- A larger 10 m / 80% hard-seed run still exposed late GLIM drift, so the current acceptance is intentionally partial.
+- Breadcrumb return-home works but can be inefficient on long routes.
+- UI/tooling is the next step so resource maps, sampled cells, candidate scores, return state, and diagnostics are visible during longer tests.
+
+Phase 4 topics to visualize:
+
+```text
+/gt/resource_maps/water
+/astrobot_0/resource/water/sample
+/astrobot_0/resource/water/sample_pose
+/astrobot_0/exploration/frontiers
+/astrobot_0/exploration/selected_goal
+/astrobot_0/exploration/status
+/astrobot_0/exploration/mission_grid
+/astrobot_0/diagnostics
+/astrobot_0/slam/bev_costmap
+/astrobot_0/navigate_to_pose/_action/status
+```
+
+### 11. Optional local GUI smoke test
 
 ```bash
 xhost +local:root

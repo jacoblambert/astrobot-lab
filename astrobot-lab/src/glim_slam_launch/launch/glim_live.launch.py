@@ -50,19 +50,6 @@ def generate_launch_description() -> LaunchDescription:
                         ],
                     ),
                     Node(
-                        package="pointcloud_preprocessor",
-                        executable="imu_relay_node",
-                        name="imu_relay",
-                        output="screen",
-                        parameters=[
-                            {
-                                "use_sim_time": use_sim_time,
-                                "input_topic": "/imu",
-                                "output_topic": "imu",
-                            }
-                        ],
-                    ),
-                    Node(
                         package="glim_ros",
                         executable="glim_rosnode",
                         name="slam",
