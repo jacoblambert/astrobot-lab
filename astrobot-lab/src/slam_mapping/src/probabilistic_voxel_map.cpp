@@ -158,6 +158,23 @@ IntegrationStats ProbabilisticVoxelMap::integratePointCloud(const Point3 & senso
 {
   IntegrationStats stats;
   stats.input_points = points.size();
+
+  // Temporal forgetting: decay all voxels toward 0 once per integration cycle and
+  // prune near-zero voxels. Applied before integrating this cloud so the current
+  // observation keeps full weight. Re-observed voxels recover via hit_log_odds;
+  // un-reobserved smear ghosts fade and are erased (no clearing ray required).
+  if (config_.decay_factor < 1.0) {
+    for (auto it = voxels_.begin(); it != voxels_.end();) {
+      const double decayed = static_cast<double>(it->second) * config_.decay_factor;
+      if (std::abs(decayed) < config_.decay_min_abs_log_odds) {
+        it = voxels_.erase(it);
+      } else {
+        it->second = static_cast<float>(decayed);
+        ++it;
+      }
+    }
+  }
+
   if (!withinBounds(sensor_origin)) {
     stats.skipped_bounds = points.size();
     stats.voxel_count = voxels_.size();

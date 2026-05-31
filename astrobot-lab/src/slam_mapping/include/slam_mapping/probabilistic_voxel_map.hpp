@@ -49,6 +49,13 @@ struct OccupancyConfig
   Point3 min_bounds{-25.0, -25.0, -2.0};
   Point3 max_bounds{25.0, 25.0, 4.0};
   int max_voxels{4000000};
+  // Temporal forgetting: each integration cycle every voxel's log-odds is multiplied
+  // by decay_factor (1.0 = disabled), and voxels whose |log_odds| falls below
+  // decay_min_abs_log_odds are pruned. Re-observed voxels (hit every cycle) stay
+  // saturated; un-reobserved voxels (e.g. yaw-drift smear ghosts) fade to unknown
+  // without needing a clearing ray to traverse them.
+  double decay_factor{1.0};
+  double decay_min_abs_log_odds{0.05};
 };
 
 struct BevProjectionConfig

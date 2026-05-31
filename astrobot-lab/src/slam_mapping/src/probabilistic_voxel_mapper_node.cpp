@@ -101,6 +101,9 @@ private:
     config.max_bounds.y = declare_parameter<double>("max_y", config.max_bounds.y);
     config.max_bounds.z = declare_parameter<double>("max_z", config.max_bounds.z);
     config.max_voxels = declare_parameter<int>("max_voxels", config.max_voxels);
+    config.decay_factor = declare_parameter<double>("decay_factor", config.decay_factor);
+    config.decay_min_abs_log_odds =
+      declare_parameter<double>("decay_min_abs_log_odds", config.decay_min_abs_log_odds);
     return config;
   }
 
