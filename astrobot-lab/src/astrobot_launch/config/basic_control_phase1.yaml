@@ -8,8 +8,11 @@ command_mux:
     max_linear_x: 0.30
     max_angular_z: 1.50
     linear_scale: 1.0
-    angular_scale: 1.5
+    angular_scale: 1.0
     angular_scale_positive: 0.0
     angular_scale_negative: 0.0
-    max_linear_accel: 0.20
-    max_angular_accel: 0.80
+    # Accel shaping is now owned by nav2_velocity_smoother (upstream of the mux).
+    # Keep the mux as a faithful pass-through + teleop override + watchdog/estop;
+    # high limits here disable its first-order accel limiter to avoid double-shaping.
+    max_linear_accel: 5.0
+    max_angular_accel: 10.0

@@ -66,7 +66,20 @@ def generate_launch_description() -> LaunchDescription:
                         name="controller_server",
                         output="screen",
                         parameters=[configured_nav2_params],
-                        remappings=[("cmd_vel", "cmd_vel_nav")],
+                        # Controller emits raw cmd_vel; the velocity_smoother shapes
+                        # it into cmd_vel_nav (which the command_mux consumes).
+                        remappings=[("cmd_vel", "cmd_vel_raw")],
+                    ),
+                    Node(
+                        package="nav2_velocity_smoother",
+                        executable="velocity_smoother",
+                        name="velocity_smoother",
+                        output="screen",
+                        parameters=[configured_nav2_params],
+                        remappings=[
+                            ("cmd_vel", "cmd_vel_raw"),
+                            ("cmd_vel_smoothed", "cmd_vel_nav"),
+                        ],
                     ),
                     Node(
                         package="nav2_bt_navigator",
@@ -95,6 +108,7 @@ def generate_launch_description() -> LaunchDescription:
                                 "node_names": [
                                     "planner_server",
                                     "controller_server",
+                                    "velocity_smoother",
                                     "bt_navigator",
                                     "behavior_server",
                                 ],
