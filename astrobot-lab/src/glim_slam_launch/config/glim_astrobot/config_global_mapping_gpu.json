@@ -2,7 +2,7 @@
   "global_mapping": {
     "so_name": "libglobal_mapping.so",
     "enable_imu": true,
-    "enable_optimization": true,
+    "enable_optimization": false,
     "init_pose_damping_scale": 10000000000.0,
     "create_between_factors": false,
     "between_registration_type": "GICP",
