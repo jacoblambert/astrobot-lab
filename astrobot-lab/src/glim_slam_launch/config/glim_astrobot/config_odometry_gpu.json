@@ -8,7 +8,7 @@
     "use_isam2_dogleg": false,
     "isam2_relinearize_skip": 1,
     "isam2_relinearize_thresh": 0.1,
-    "fix_imu_bias": false,
+    "fix_imu_bias": true,
     "voxel_resolution": 0.25,
     "voxel_resolution_max": 0.5,
     "voxel_resolution_dmin": 5.0,
@@ -23,7 +23,7 @@
     "keyframe_delta_trans": 2.0,
     "keyframe_delta_rot": 0.5,
     "keyframe_entropy_thresh": 0.99,
-    "validate_imu": true,
+    "validate_imu": false,
     "save_imu_rate_trajectory": true,
     "num_threads": 2
   }
