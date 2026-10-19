@@ -15,12 +15,12 @@ def generate_launch_description() -> LaunchDescription:
         [
             DeclareLaunchArgument("use_sim_time", default_value="true"),
             DeclareLaunchArgument("robot_namespace", default_value="astrobot_0"),
-            DeclareLaunchArgument("crop_min_x", default_value="0.20"),
-            DeclareLaunchArgument("crop_max_x", default_value="0.80"),
+            DeclareLaunchArgument("crop_min_x", default_value="-0.95"),
+            DeclareLaunchArgument("crop_max_x", default_value="0.05"),
             DeclareLaunchArgument("crop_min_y", default_value="-0.45"),
             DeclareLaunchArgument("crop_max_y", default_value="0.45"),
-            DeclareLaunchArgument("crop_min_z", default_value="-0.35"),
-            DeclareLaunchArgument("crop_max_z", default_value="0.05"),
+            DeclareLaunchArgument("crop_min_z", default_value="-0.30"),
+            DeclareLaunchArgument("crop_max_z", default_value="0.25"),
             DeclareLaunchArgument(
                 "nav2_params",
                 default_value=PathJoinSubstitution(

@@ -1,0 +1,30 @@
+# Explicit selected native + GLIM/v2 diagnostic acquisition, no GUI or navigation.
+# Use with lunaryard and archive; start only the named simulator service.
+services:
+  astrobot-sim:
+    environment:
+      DISPLAY: ""
+      OMNILRS_HEADLESS: "true"
+      OMNILRS_DISABLE_VIEWPORT_UPDATES: "true"
+      OMNILRS_IMPORT_STAT_CACHE: ${SELECTED_IMPORT_STAT_CACHE:-true}
+      OMNILRS_SELECTED_EXPERIENCE: ${SELECTED_ISAAC_EXPERIENCE:-default}
+      OMNILRS_ENVIRONMENT: lunaryard_40m
+      OMNILRS_ENVIRONMENT_SEED: "43"
+      OMNILRS_ROCKS_ENABLED: "true"
+      OMNILRS_DEMO_ROCK_PROFILE: ${SELECTED_DEMO_ROCK_PROFILE:-}
+      OMNILRS_NATURAL_HOLDOUT: "true"
+      OMNILRS_NATURAL_MOTION: ${SELECTED_ROUTE:-loop16}
+      OMNILRS_CAPTURE_EXECUTION_PROFILE: ${SELECTED_EXECUTION_PROFILE:-default}
+      OMNILRS_SELECTED_LIDAR: "true"
+      ASTROBOT_SELECTED_LIDAR_PROFILE: selected_optical_v2
+      OMNILRS_PHYSICS_IMU: "true"
+      OMNILRS_GT_TF_ENABLED: "false"
+      OMNILRS_GT_MAP_ENABLED: "false"
+      OMNILRS_RESOURCE_ENABLED: "false"
+      OMNILRS_CAMERA_ENABLED: "false"
+      OMNILRS_TERRAIN_GT_PROBE: "false"
+      OMNILRS_TERRAIN_CALIBRATION: "false"
+      OMNILRS_TERRAIN_DRIVE: "false"
+      OMNILRS_TERRAIN_NATIVE_PUBLISH: "true"
+      OMNILRS_TERRAIN_NATIVE_CAPTURE: "false"
+      OMNILRS_TERRAIN_SHADOW: "false"

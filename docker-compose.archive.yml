@@ -1,0 +1,34 @@
+# Opt-in archive mount: Docker must not create a missing drive path on root disk.
+services:
+  astrobot-sim:
+    # One world/session per declared experiment. A crash must remain a failed
+    # attempt, not silently start another world inside the same collector.
+    restart: "no"
+    environment:
+      - OMNILRS_TERRAIN_GT_PROBE=${OMNILRS_TERRAIN_GT_PROBE:-false}
+      - OMNILRS_TERRAIN_CALIBRATION=${OMNILRS_TERRAIN_CALIBRATION:-false}
+      - OMNILRS_TERRAIN_DRIVE=${OMNILRS_TERRAIN_DRIVE:-false}
+      - OMNILRS_TERRAIN_DRIVE_PATTERN=${OMNILRS_TERRAIN_DRIVE_PATTERN:-straight}
+      - OMNILRS_TERRAIN_LIDAR_PITCH_DEG=${OMNILRS_TERRAIN_LIDAR_PITCH_DEG:-0}
+      - OMNILRS_TERRAIN_NATIVE_CAPTURE=${OMNILRS_TERRAIN_NATIVE_CAPTURE:-false}
+      - OMNILRS_TERRAIN_NATIVE_PUBLISH=${OMNILRS_TERRAIN_NATIVE_PUBLISH:-false}
+      - OMNILRS_TERRAIN_SHADOW=${OMNILRS_TERRAIN_SHADOW:-false}
+      - OMNILRS_PHYSICS_IMU=${OMNILRS_PHYSICS_IMU:-false}
+      - OMNILRS_NATURAL_HOLDOUT=${OMNILRS_NATURAL_HOLDOUT:-false}
+      - OMNILRS_NATURAL_MOTION=${OMNILRS_NATURAL_MOTION:-}
+      - OMNILRS_SELECTED_LIDAR=${OMNILRS_SELECTED_LIDAR:-false}
+      - OMNILRS_GT_MAP_ENABLED=${OMNILRS_GT_MAP_ENABLED:-true}
+    volumes:
+      - type: bind
+        source: /media/jacoblambert/6c8aadd0-9332-4357-aea4-437b6aadef261/astrobot-lab
+        target: /archive
+        bind:
+          create_host_path: false
+      - ./tools:/workspace/terrain-tools:ro
+  astrobot-dev:
+    volumes:
+      - type: bind
+        source: /media/jacoblambert/6c8aadd0-9332-4357-aea4-437b6aadef261/astrobot-lab
+        target: /archive
+        bind:
+          create_host_path: false

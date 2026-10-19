@@ -41,6 +41,36 @@ ssh -L 8765:localhost:8765 <user>@<remote-host>
 ws://localhost:8765
 ```
 
+### Phase 5 mission console
+
+Frontend-only mockup:
+
+```bash
+cd ui/astrobot-console
+npm install
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:5173
+```
+
+Live backend, after launching the autonomy stack:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase5_gui.launch.py'
+```
+
+Health/state checks:
+
+```bash
+curl http://127.0.0.1:8080/api/health
+curl http://127.0.0.1:8080/api/state | jq '.robots[0], .mission'
+```
+
 ### Phase 1 nav
 
 ```bash
@@ -115,6 +145,20 @@ launching unless you edit code inside an already-running container.
 OMNILRS_ROCKS_ENABLED=true docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
 ```
 
+GLIM source build status:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml run --rm --no-deps astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && ros2 pkg prefix glim && ros2 pkg prefix glim_ros && ros2 pkg executables glim_ros'
+
+docker compose -f docker-compose.lunaryard.yml run --rm --no-deps --entrypoint bash astrobot-dev -lc \
+  'source /etc/ros_setup.sh && ldd /opt/astrobot/glim_source/lib/glim_ros/glim_rosnode | grep -E "libglim|libglim_ros|not found"'
+```
+
+Expected prefixes are `/opt/astrobot/glim_source`. The Docker image builds `glim`
+and `glim_ros` from the `Open-Space-Systems` submodules; runtime workspace
+auto-build skips those packages by default.
+
 Keep simulator GT state enabled for Nav2 control. Phase 2 runs GLIM in parallel
 for evaluation and visualization, not as the Nav2 localization source.
 
@@ -134,7 +178,7 @@ small robot-body crop box. Override the box if robot returns are still visible:
 
 ```bash
 docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
-  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch astrobot_master.launch.py nav2_params:=/workspace/astrobot-lab/astrobot-lab/src/astrobot_launch/config/nav2_phase2_slam.yaml crop_min_x:=0.20 crop_max_x:=0.90 crop_min_y:=-0.50 crop_max_y:=0.50 crop_min_z:=-0.40 crop_max_z:=0.10'
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch astrobot_master.launch.py nav2_params:=/workspace/astrobot-lab/astrobot-lab/src/astrobot_launch/config/nav2_phase2_slam.yaml crop_min_x:=-0.95 crop_max_x:=0.05 crop_min_y:=-0.45 crop_max_y:=0.45 crop_min_z:=-0.30 crop_max_z:=0.25'
 ```
 
 Visualize these topics in Foxglove:
@@ -358,6 +402,15 @@ Visualize with Foxglove fixed frame `map`:
 /astrobot_0/navigate_to_pose/_action/status
 ```
 
+Notes:
+
+- `/gt/map` is the simulator rock-obstacle reference map only. It no longer
+  includes the Lunaryard terrain generation mask/slope raster.
+- The active GLIM LiDAR/IMU profile uses `acc_scale=1.0` and
+  `sensors.imu_gravity_magnitude=1.62`. The old `acc_scale=6.052` over-scaled
+  dynamic acceleration and caused long-run drift. `validate_imu=false` remains
+  the conservative live setting.
+
 Current Phase 3 gate from 2026-05-17:
 
 ```text
@@ -371,11 +424,23 @@ nav_20_goal_gate_3m_lio_online_201648.json:
 
 ### Phase 4 resource-aware exploration
 
+Resource map coordinate system — `OMNILRS_RESOURCE_CENTERS` positions are in OmniLRS world frame
+(same as `gt_map` ROS frame). For lunaryard_40m the robot starts at world ≈ (19.875, 18.133).
+To place a peak at SLAM (sx, sy): world_x = 19.875 - sx, world_y = 18.133 - sy.
+
 Start deterministic resources for smoke testing:
 
 ```bash
 OMNILRS_ROCKS_ENABLED=true OMNILRS_GT_TF_ENABLED=false OMNILRS_RESOURCE_MODE=deterministic \
   docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
+```
+
+Start with a single near-gradient peak for sample_return validation (peak at SLAM (8,6) = 10m):
+
+```bash
+OMNILRS_ROCKS_ENABLED=true OMNILRS_GT_TF_ENABLED=true \
+OMNILRS_RESOURCE_MODE=deterministic OMNILRS_RESOURCE_CENTERS="11.875,12.133,4.0,1.0" \
+  docker compose -f docker-compose.lunaryard.yml up -d --force-recreate
 ```
 
 Start randomized multi-Gaussian resources for gate-style runs:
@@ -392,16 +457,59 @@ docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
   'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase4_exploration.launch.py mission_mode:=sample_return sample_success_threshold:=0.75'
 ```
 
-Run the current hard seeded sample-return check:
+Run the small sample_return validation (single clear gradient, peak at SLAM (8,6)=10m):
+
+```bash
+# Sim must be started with OMNILRS_RESOURCE_CENTERS="11.875,12.133,4.0,1.0"
+# If launching after a previous run killed GLIM, use exploration_start_delay:=120.0
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && \
+   ros2 launch astrobot_launch phase4_exploration.launch.py mission_mode:=sample_return \
+   home_radius_m:=19.0 max_goal_distance_m:=5.0 max_duration_sec:=600.0 exploration_start_delay:=120.0'
+```
+
+Run the current hard seeded sample-return check (home_radius=19m = full yard, no artificial limit):
+
+```bash
+OMNILRS_ROCKS_ENABLED=true OMNILRS_GT_TF_ENABLED=false \
+OMNILRS_RESOURCE_ENABLED=true OMNILRS_RESOURCE_MODE=random OMNILRS_RESOURCE_SEED=20260611 \
+OMNILRS_RESOURCE_RANDOM_GAUSSIANS=8 OMNILRS_RESOURCE_RANDOM_SIGMA_MIN=5.0 OMNILRS_RESOURCE_RANDOM_SIGMA_MAX=10.0 \
+docker compose -f docker-compose.lunaryard.yml up -d --force-recreate
+
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && \
+   ros2 launch astrobot_launch phase4_exploration.launch.py mission_mode:=sample_return \
+   home_radius_m:=19.0 max_goal_distance_m:=5.0 max_duration_sec:=900.0 exploration_start_delay:=35.0'
+```
+
+Run the latest hard seed-411 exploration diagnostic with the current GLIM IMU
+config:
 
 ```bash
 OMNILRS_ROCKS_ENABLED=true OMNILRS_ENVIRONMENT_SEED=411 OMNILRS_GT_TF_ENABLED=false \
-OMNILRS_RESOURCE_ENABLED=true OMNILRS_RESOURCE_MODE=random OMNILRS_RESOURCE_SEED=20260611 \
-OMNILRS_RESOURCE_RANDOM_GAUSSIANS=8 OMNILRS_RESOURCE_RANDOM_SIGMA_MIN=5.0 OMNILRS_RESOURCE_RANDOM_SIGMA_MAX=10.0 \
+OMNILRS_RESOURCE_ENABLED=true OMNILRS_RESOURCE_MODE=random OMNILRS_RESOURCE_SEED=1001 \
+OMNILRS_RESOURCE_RANDOM_GAUSSIANS=4 OMNILRS_RESOURCE_RANDOM_SIGMA_MIN=6.0 OMNILRS_RESOURCE_RANDOM_SIGMA_MAX=9.0 \
+OMNILRS_RESOURCE_RANDOM_AMPLITUDE_MIN=0.75 OMNILRS_RESOURCE_RANDOM_AMPLITUDE_MAX=1.0 \
 docker compose -f docker-compose.lunaryard.yml up -d --force-recreate astrobot-dev astrobot-sim
 
 docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
-  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase4_exploration.launch.py mission_mode:=sample_return sample_success_threshold:=0.80 home_radius_m:=12.0 max_goal_distance_m:=8.0 resource_weight_scale:=7.0 resource_influence_radius_m:=5.0 resource_decay_radius_m:=2.0 max_resource_candidates:=30 resource_explore_radius_m:=4.0 mission_cell_size_m:=2.0 exploration_start_delay:=35.0'
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase4_exploration.launch.py mission_mode:=explore_radius coverage_goal_fraction:=0.80 home_radius_m:=8.0 max_goal_distance_m:=8.0 mission_cell_size_m:=2.0 mission_candidate_limit:=120 exploration_start_delay:=35.0'
+```
+
+HISTORICAL diagnostic reference from 2026-05-30 (pre CPU-GLIM switch — the active odometry
+config is now `config_odometry_cpu.json`; see "Phase 4 gate harness & suite" below for current state):
+
+```text
+GLIM config (as of 2026-05-30):
+  config_ros.json acc_scale=1.0
+  config_odometry_gpu.json validate_imu=false
+
+hard seed 411, 8 m / 80% explore diagnostic:
+  no "IMU prediction is not good" GLIM warnings
+  max observed SLAM-vs-GT error ~= 0.62 m
+  no slam_pose_error_drifting or slam_gt_increment_mismatch fault
+  reached 27/51 = 51.9% coverage before return-home/max-goal behavior
+  remaining issue appears to be exploration/reachability tuning, not SLAM divergence
 ```
 
 Expected reference from `rosbags/phase4_abundant_sample_return_hard_seed411_20260525_212515`:
@@ -450,7 +558,132 @@ Foxglove topics:
 /astrobot_0/resource/water/sample_pose
 /astrobot_0/exploration/frontiers
 /astrobot_0/exploration/selected_goal
+/astrobot_0/exploration/events
 /astrobot_0/exploration/status
 /astrobot_0/exploration/mission_grid
 /astrobot_0/diagnostics
 ```
+
+### Phase 4 gate harness & suite (the official PASS/FAIL — 2026-06-07)
+
+Gate criteria (GT-scored; the mission's own success flag is NEVER trusted — SLAM drift produces
+false successes): `sample_return` = best_sample >= 0.75 AND final GT pose <= 1 m from home (20,18);
+`explore_radius` = coverage >= 0.70 AND mission finished. One retry per gate.
+
+Run ONE gate (host-side; does its own fresh bring-up/teardown, auto-starts foxglove :8765 +
+console backend :8080 so every run is watchable live):
+
+```bash
+tools/phase4_mission_gate_run.sh 42 sample_return --retries 1
+tools/phase4_mission_gate_run.sh 7 explore_radius --retries 1
+# optional: override the default artifact root (`rosbags/phase4_gate_artifacts/`):
+tools/phase4_mission_gate_run.sh 7 sample_return --retries 0 --record my_diag_dir
+```
+
+Each attempt records navigation diagnostics inside the eval node, without extra
+observer processes. Per-attempt artifacts live under
+`rosbags/phase4_gate_artifacts/<mode>_seed<seed>_a<N>/` by default:
+
+```text
+eval.json
+goal_events.jsonl
+raw_exploration_events.jsonl
+diagnostics.jsonl
+gt_base.tum
+slam_corrected.tum
+snapshots/*.npz
+mission_launch.log
+eval_stdout.log
+```
+
+Summarize gate/navigation failure classes:
+
+```bash
+python3 tools/phase4_nav_diagnostics_summary.py rosbags/phase4_gate_suite.json
+python3 tools/phase4_nav_diagnostics_summary.py rosbags/phase4_gate_explore_radius_seed42.json
+```
+
+Full suite (matrix + `rosbags/phase4_gate_suite.json`; ~2-3 h unattended):
+
+```bash
+tools/phase4_gate_suite.sh --seeds "42 411 7" --modes "sample_return explore_radius" --retries 1
+```
+
+Current matrix (tuned stack: CPU GLIM + real rocks + mapper retune + recovery-wiring fix):
+sample_return 42 PASS / 411 FAIL (residual SLAM accuracy) / 7 PASS; explore_radius 0/3
+(dense-cluster stall cascade — see PHASE_DEFINITIONS.md Phase 4 "Current status" for the full
+fix menu). The mission console frontend should be kept running on the host:
+`cd ui/astrobot-console && npm run dev -- --host` (port 5173; proxies the backend on :8080).
+
+### SLAM divergence study (statistical characterization, not point-fixes)
+
+```bash
+# N repeats x seeds, one mission attempt each, fingerprint per run + aggregate clustering:
+tools/slam_divergence_study.sh --seeds "42 411 7" --mode sample_return --reps 3 --tag mytag
+# per-run fingerprint (diverged?, onset t/xy, type, turning?, imu warnings, max err):
+python3 tools/slam_divergence_fingerprint.py rosbags/divergence_study/mytag/seed7_r1/<attempt_dir>
+```
+
+IMPORTANT: recording happens INSIDE the eval node (`--record-dir`) — do NOT add extra recorder
+processes to measurement runs; 3 light recorders once amplified a 2.5 m drift into 8-23 m
+divergences (observer effect, documented 2026-06-04). The Phase 4 gate harness follows
+that rule: goal events, diagnostics, TUM traces, and stall/spin snapshots are collected by
+`tools/phase4_exploration_eval.py`.
+
+### BEV mapper evaluation & tuning (alignment-correct)
+
+```bash
+# live per-rock feature recall + cell precision vs /gt/map (run INSIDE dev, stack up):
+python3 tools/bev_gt_eval.py --duration 60
+# canonical map<->world alignment from a recorded run dir (least-squares, IMU->base aware):
+python3 tools/map_gt_alignment.py rosbags/<run_dir_with_tums>
+# offline param sweep: replay a recorded bag through the voxel mapper across hit x decay grids,
+# score recall/precision/flicker per combo (run INSIDE dev; bag needs aligned_points_corrected
+# + pose_corrected + gt topics + bev_costmap):
+bash tools/bev_sweep.sh /workspace/astrobot-lab/rosbags/bev_tune_seed7 /workspace/astrobot-lab/rosbags/my_sweep
+# score one bag (final-grid recall/precision + flicker toggles/min + transient blips):
+python3 tools/bev_bag_score.py <bag_dir> --label mylabel --csv out.csv
+```
+
+Current mapper operating point (phase2_slam.launch.py, swept 2026-06-06): hit_log_odds 0.5,
+decay_factor 0.998, max_voxels 6M -> rock recall 59% / precision 96% / flicker 635 toggles/min
+(baseline 0.85/0.97/1.2M was 21% / 95% / 1929). Per-rock recall is the honest metric — GT marks
+full rock footprints, LiDAR marks visible rims; naive cell-wise recall under-reads catastrophically.
+
+### Gotchas that cost real debugging time (read before touching the sim/stack)
+
+- `use_point_instancer` MUST stay False — point-instanced rocks are INVISIBLE to the RTX LiDAR.
+- `slam/odom_corrected` is nav_msgs/Odometry; `slam/pose_corrected` is PoseStamped. A wrong-typed
+  rclpy subscription receives NOTHING silently (ros2 echo/hz still work — they're type-agnostic).
+- GLIM's pose_corrected is the IMU frame: simulator TF `base_link -> Imu_Sensor`
+  is `(0.264, 0.017, 0.262, yaw pi)`. Convert IMU to base before comparing to
+  GT (tools/map_gt_alignment.py does this).
+- `kill -INT` on background jobs of a NON-interactive shell is a silent no-op (SIGINT inherited as
+  ignored) — use SIGTERM to stop ros2 bag record etc., or bags never finalize (no metadata.yaml).
+- behavior_server needs `remappings=[("cmd_vel", "cmd_vel_raw")]` (phase1_nav.launch.py) or
+  recoveries fight the command_mux on the final cmd_vel topic and silently do nothing.
+- explore_radius `coverage_goal_fraction` must EQUAL the gate threshold (0.70) — a stricter
+  mission self-goal times out `not_finished` at gate-level coverage.
+
+### RTK / absolute-position fusion (on by default in phase2/3/4)
+
+Full design + "full authority" semantics + caveats: `astrobot-lab/src/synthetic_rtk/README.md`.
+
+```bash
+# Offline A/B replay through GLIM (no sim) on the divergence fixture, toggle RTK via the config:
+tools/rtk_replay_ab.sh /workspace/astrobot-lab/rosbags/seed411_sparse_explore \
+  /workspace/astrobot-lab/astrobot-lab/src/glim_slam_launch/config/glim_astrobot mytest
+# Disable RTK for a run:  start_synthetic_rtk:=false   OR   config_ros abs_constraint.enable=false
+```
+
+- RTK = synthetic_rtk (sim source from GT; swap for a real beacon driver on hardware) -> `/rtk/pose`
+  -> `abs_constraint_module` (glim_ros2, additive) -> GPSFactor (position) + yaw PriorFactor on X(current).
+  Needs `init_T_world_imu` pinning (config_odometry) so the home-relative fix is a direct world prior.
+- "Full authority" = `gate_dist=0` + `huber_k=0` = RTK is never gated/robust-rejected. It is NOT
+  dominance: per-frame the scan prior (Precision 1e3) > RTK (~400); RTK bounds drift by accumulating
+  absolute anchors on every pose + breaking the divergence feedback loop. To make RTK dominate
+  per-frame you'd lower the scan prior `Isotropic::Precision(6, 1e3)`, not gate/huber.
+- Validated: arrests catastrophic feature-poor divergence (9480m->~1m) + bounds long-drive drift to
+  ~0.3m (vs 2.5m when RTK starves out of the graph). The "RTK not getting into the graph" bug was a
+  too-tight `assoc_tolerance` (0.05->0.2s) + low publish rate (synthetic_rtk republishes at 30Hz).
+- Caveat: gate/huber=0 has NO bad-fix protection -> add a kinematic RTK-to-RTK gate for real hardware.

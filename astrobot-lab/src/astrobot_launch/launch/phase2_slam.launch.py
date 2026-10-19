@@ -12,6 +12,7 @@ def generate_launch_description() -> LaunchDescription:
     use_sim_time = LaunchConfiguration("use_sim_time")
     start_glim = LaunchConfiguration("start_glim")
     start_bev_map = LaunchConfiguration("start_bev_map")
+    start_synthetic_rtk = LaunchConfiguration("start_synthetic_rtk")
     glim_config_path = LaunchConfiguration("glim_config_path")
     robot_namespace = LaunchConfiguration("robot_namespace")
 
@@ -21,14 +22,25 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("robot_namespace", default_value="astrobot_0"),
             DeclareLaunchArgument("start_glim", default_value="true"),
             DeclareLaunchArgument("start_bev_map", default_value="true"),
-            DeclareLaunchArgument("voxel_size", default_value="0.05"),
+            DeclareLaunchArgument("start_synthetic_rtk", default_value="true"),
+            DeclareLaunchArgument("rtk_sigma0", default_value="0.05"),
+            DeclareLaunchArgument("rtk_sigma_per_m", default_value="0.01"),
+            DeclareLaunchArgument("rtk_dropout_prob", default_value="0.0"),
+            DeclareLaunchArgument("rtk_latency_s", default_value="0.0"),
+            DeclareLaunchArgument("voxel_size", default_value="0.10"),
             DeclareLaunchArgument("bev_resolution", default_value="0.10"),
-            DeclareLaunchArgument("crop_min_x", default_value="0.20"),
-            DeclareLaunchArgument("crop_max_x", default_value="0.80"),
+            # Self-filter box (lidar_0 frame) FLIPPED for the front+lower re-mount (2026-06-13):
+            # the LiDAR moved from base (-0.15,0,0.415) to (0.40,0,0.25), so the chassis body is now
+            # BEHIND + below the sensor (negative x in lidar frame). Old box removed x[0.2,0.8]
+            # (forward, when the lidar was at the rear) -- keeping that would now delete the very
+            # forward rocks we re-mounted to see. New box removes the rear/under body; forward
+            # (x > 0.05) is preserved. VALIDATE against the live cloud and tighten if it clips rocks.
+            DeclareLaunchArgument("crop_min_x", default_value="-0.95"),
+            DeclareLaunchArgument("crop_max_x", default_value="0.05"),
             DeclareLaunchArgument("crop_min_y", default_value="-0.45"),
             DeclareLaunchArgument("crop_max_y", default_value="0.45"),
-            DeclareLaunchArgument("crop_min_z", default_value="-0.35"),
-            DeclareLaunchArgument("crop_max_z", default_value="0.05"),
+            DeclareLaunchArgument("crop_min_z", default_value="-0.30"),
+            DeclareLaunchArgument("crop_max_z", default_value="0.25"),
             DeclareLaunchArgument(
                 "glim_config_path",
                 default_value=PathJoinSubstitution(
@@ -52,6 +64,36 @@ def generate_launch_description() -> LaunchDescription:
                     "crop_max_z": LaunchConfiguration("crop_max_z"),
                 }.items(),
             ),
+            # Synthetic RTK / surface-beacon absolute-position source. Publishes a
+            # measurement topic (/rtk/pose) ONLY -- never a TF (honours the
+            # OMNILRS_GT_TF_ENABLED=false discipline). Consumed by GLIM's
+            # abs_constraint extension module to bound degenerate-terrain jumps.
+            # Absolute topics (/gt/base_link_pose, /rtk/pose) -> not namespaced.
+            Node(
+                package="synthetic_rtk",
+                executable="synthetic_rtk",
+                name="synthetic_rtk",
+                output="screen",
+                condition=IfCondition(start_synthetic_rtk),
+                parameters=[
+                    {
+                        "use_sim_time": use_sim_time,
+                        "gt_topic": "/gt/base_link_pose",
+                        "output_topic": "/rtk/pose",
+                        "world_frame": "map",
+                        "home_xy": [20.0, 18.0],
+                        "antenna_offset_xyz": [0.264, 0.017, 0.262],
+                        "sigma0": ParameterValue(LaunchConfiguration("rtk_sigma0"), value_type=float),
+                        "sigma_per_m": ParameterValue(
+                            LaunchConfiguration("rtk_sigma_per_m"), value_type=float
+                        ),
+                        "dropout_prob": ParameterValue(
+                            LaunchConfiguration("rtk_dropout_prob"), value_type=float
+                        ),
+                        "latency_s": ParameterValue(LaunchConfiguration("rtk_latency_s"), value_type=float),
+                    }
+                ],
+            ),
             GroupAction(
                 [
                     PushRosNamespace(robot_namespace),
@@ -62,51 +104,12 @@ def generate_launch_description() -> LaunchDescription:
                         output="screen",
                         condition=IfCondition(start_bev_map),
                         parameters=[
+                            PathJoinSubstitution([FindPackageShare("astrobot_launch"), "config", "mapper_surface.yaml"]),
                             {
                                 "use_sim_time": use_sim_time,
-                                "input_topic": "slam/aligned_points_corrected",
-                                "pose_topic": "slam/pose_corrected",
-                                "voxel_output_topic": "slam/prob_voxel_map",
-                                "costmap_output_topic": "slam/bev_costmap",
-                                "frame_id": "map",
                                 "voxel_size": ParameterValue(LaunchConfiguration("voxel_size"), value_type=float),
                                 "bev_resolution": ParameterValue(LaunchConfiguration("bev_resolution"), value_type=float),
-                                "width_m": 40.0,
-                                "height_m": 40.0,
-                                "origin_x": -20.0,
-                                "origin_y": -20.0,
-                                "hit_log_odds": 0.85,
-                                "miss_log_odds": -0.20,
-                                "min_log_odds": -3.0,
-                                "max_log_odds": 4.0,
-                                "occupied_threshold": 1.0,
-                                "free_threshold": -0.8,
-                                "max_range": 35.0,
-                                "point_stride": 3,
-                                "ray_stride": 1,
-                                "min_z": -2.0,
-                                "max_z": 4.0,
-                                "max_voxels": 1200000,
-                                "decay_factor": 0.97,
-                                "decay_min_abs_log_odds": 0.05,
-                                "ground_window_radius": 2,
-                                "ground_percentile": 0.10,
-                                "low_z_percentile": 0.10,
-                                "high_z_percentile": 0.90,
-                                "min_occupied_voxels_per_cell": 1,
-                                "obstacle_height": 0.12,
-                                "lethal_obstacle_height": 0.35,
-                                "obstacle_cost_min": 88,
-                                "obstacle_cost_max": 100,
-                                "terrain_risk_height": 0.06,
-                                "terrain_risk_cost_max": 8,
-                                "obstacle_inflation_radius": 0.85,
-                                "obstacle_inflation_cost": 62,
-                                "obstacle_inflation_min_cost": 8,
-                                "obstacle_inflation_exponent": 1.35,
-                                "publish_voxel_map": False,
-                                "publish_rate_hz": 2.0,
-                            }
+                            },
                         ],
                     ),
                 ]

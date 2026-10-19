@@ -17,6 +17,11 @@ services:
       - OMNILRS_HEADLESS=${OMNILRS_HEADLESS:-true}
       - OMNILRS_ROCKS_ENABLED=${OMNILRS_ROCKS_ENABLED:-}
       - OMNILRS_GT_TF_ENABLED=${OMNILRS_GT_TF_ENABLED:-true}
+      # Camera (RGB+depth, 2 RTX-raytraced streams). Default ON again: GLIM moved
+      # to CPU (2026-06-03), freeing the GPU for Isaac, so the camera no longer
+      # competes with SLAM for GPU compute. Set false to reclaim max GPU/VRAM
+      # headroom on the 8GB GPU for large/multi-robot scenes.
+      - OMNILRS_CAMERA_ENABLED=${OMNILRS_CAMERA_ENABLED:-true}
       - OMNILRS_RESOURCE_ENABLED=${OMNILRS_RESOURCE_ENABLED:-true}
       - OMNILRS_RESOURCE_MODE=${OMNILRS_RESOURCE_MODE:-deterministic}
       - OMNILRS_RESOURCE_SEED=${OMNILRS_RESOURCE_SEED:-4242}
@@ -24,6 +29,7 @@ services:
       - OMNILRS_RESOURCE_RANDOM_GAUSSIANS=${OMNILRS_RESOURCE_RANDOM_GAUSSIANS:-3}
       - OMNILRS_RESOURCE_RANDOM_SIGMA_MIN=${OMNILRS_RESOURCE_RANDOM_SIGMA_MIN:-3.5}
       - OMNILRS_RESOURCE_RANDOM_SIGMA_MAX=${OMNILRS_RESOURCE_RANDOM_SIGMA_MAX:-7.5}
+      - OMNILRS_RESOURCE_CENTERS=${OMNILRS_RESOURCE_CENTERS:-}
       - ASTROBOT_ROBOT_NAMESPACE=${ASTROBOT_ROBOT_NAMESPACE:-astrobot_0}
       - ROS_DOMAIN_ID=177
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
@@ -73,9 +79,13 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
       - ASTROBOT_AUTO_BUILD=${ASTROBOT_AUTO_BUILD:-true}
+      - ASTROBOT_BUILD_SOURCE_GLIM=${ASTROBOT_BUILD_SOURCE_GLIM:-false}
       - ASTROBOT_ROBOT_NAMESPACE=${ASTROBOT_ROBOT_NAMESPACE:-astrobot_0}
     ports:
-      - "127.0.0.1:8765:8765"
+      # Bound on all interfaces so the console/Foxglove are reachable from other
+      # machines too (8765 = foxglove_bridge ws, 8080 = astrobot console backend).
+      - "8765:8765"
+      - "8080:8080"
     volumes:
       - ./:/workspace/astrobot-lab:rw
       - ./OmniLRS:/workspace/omnilrs:rw

@@ -1,0 +1,20 @@
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="2" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <RateController hz="1.0">
+          <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"
+            error_code_id="{compute_path_error_code}" />
+        </RateController>
+        <FollowPath path="{path}" controller_id="FollowPath" error_code_id="{follow_path_error_code}" />
+      </PipelineSequence>
+      <Sequence name="BoundedLocalEscape">
+        <BackUp backup_dist="0.65" backup_speed="0.08" time_allowance="12.0"
+          error_code_id="{backup_error_code}" />
+        <Wait wait_duration="1.0" />
+        <ClearEntireCostmap service_name="local_costmap/clear_entirely_local_costmap" />
+        <ClearEntireCostmap service_name="global_costmap/clear_entirely_global_costmap" />
+      </Sequence>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

@@ -1,11 +1,13 @@
 {
   "sensors": {
-    "imu_acc_noise": 3.0,
-    "imu_gyro_noise": 0.02,
-    "imu_int_noise": 0.01,
+    "imu_gravity_magnitude": 1.62,
+    "_comment_imu_noise": "TIGHT setting (acc 0.005, 10x tighter than the original real-MEMS 0.05) to reflect the NEAR-NOISELESS sim IMU (OmniLRS adds no IMU sensor noise). The tight preint factor binds physically-impossible per-frame motion AND keeps full exploration (seed411 goals 19-25, vs loose-IMU v6 ~13: loose IMU drifts -> blacklist flood). PAIR ONLY WITH MODERATE RTK (sigma_floor 0.05 / precision 400): tight IMU + STRONG RTK (sigma 0.035) over-constrain and FIGHT -> numerical blow-up (1e18). Residual: a ~20% GRADUAL drift mode (gate-blind) that only strong RTK could correct -- see config_ros.json sigma_floor + the RTK-arbitrated-gate TODO. Restore 0.05/0.01 to revert to the loose buffer.",
+    "imu_acc_noise": 0.005,
+    "imu_gyro_noise": 0.001,
+    "imu_int_noise": 0.001,
     "imu_bias_noise": 0.001,
     "global_shutter_lidar": true,
-    "T_lidar_imu": [0.414, 0.017, -0.153, 0.0, 0.0, 1.0, 0.0],
+    "T_lidar_imu": [-0.136, 0.017, 0.012, 0.0, 0.0, 1.0, 0.0],
     "intensity_field": "",
     "ring_field": "",
     "autoconf_perpoint_times": false,

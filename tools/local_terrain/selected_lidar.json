@@ -1,0 +1,17 @@
+{
+  "schema": "selected_single_lidar_v1",
+  "layout": "mid_dense_10_to_-60",
+  "status": "selected_development_setup_not_navigation_qualified",
+  "base_from_lidar_translation_m": [0.4, 0.0, 0.25],
+  "mount_rpy_deg": [0.0, 0.0, 0.0],
+  "elevation_bands_deg": [[10.0, 0.0, 5], [-2.0, -30.0, 20], [-35.0, -60.0, 7]],
+  "elevation_convention": "sensor_local_positive_up",
+  "horizontal_columns": 1999,
+  "horizontal_resolution_deg": 0.18000000715255737,
+  "horizontal_start_rad": -3.141592653589793,
+  "rotation_hz": 10.0,
+  "min_range_m": 0.5,
+  "max_range_m": 100.0,
+  "native_backend": "isaac_generic_explicit_rays",
+  "note": "Freeze beam geometry, not base height: loaded base pose remains measured. Legacy uniform LiDAR/ROS adapter is not compatible with this ray table."
+}

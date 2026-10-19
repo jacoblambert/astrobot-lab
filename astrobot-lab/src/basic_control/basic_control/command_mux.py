@@ -6,6 +6,8 @@ import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
+from rclpy.clock import Clock, ClockType
+from astrobot_interfaces.msg import LocalizationStatus
 from std_msgs.msg import Bool, String
 
 
@@ -42,6 +44,10 @@ class CommandMux(Node):
             self.mode = "auto"
 
         self.estop = False
+        self.require_localization = bool(self.declare_parameter("require_localization", False).value)
+        self._localization_allowed = False
+        self._localization_stamp = None
+        self._wall_clock = Clock(clock_type=ClockType.STEADY_TIME)
         self._nav_cmd: Optional[Twist] = None
         self._teleop_cmd: Optional[Twist] = None
         self._nav_stamp = None
@@ -57,8 +63,9 @@ class CommandMux(Node):
         self.create_subscription(Twist, "cmd_vel_teleop", self._teleop_callback, 10)
         self.create_subscription(Bool, "control/estop", self._estop_callback, 10)
         self.create_subscription(String, "control/mode", self._mode_callback, 10)
+        self.create_subscription(LocalizationStatus, "localization/status", self._localization_callback, 10)
 
-        self.create_timer(1.0 / max(self.publish_rate_hz, 1.0), self._publish_loop)
+        self.create_timer(1.0 / max(self.publish_rate_hz, 1.0), self._publish_loop, clock=self._wall_clock)
         self.create_timer(1.0, self._publish_status)
 
         self.get_logger().info(
@@ -76,6 +83,14 @@ class CommandMux(Node):
 
     def _estop_callback(self, msg: Bool) -> None:
         self.estop = bool(msg.data)
+
+    def _localization_callback(self, msg: LocalizationStatus) -> None:
+        was_allowed = self._localization_allowed and self._is_fresh(self._localization_stamp, 0.1)
+        self._localization_allowed = msg.motion_permitted
+        self._localization_stamp = time.monotonic()
+        if not msg.motion_permitted or not was_allowed:
+            self._nav_cmd = self._teleop_cmd = None
+            self._nav_stamp = self._teleop_stamp = None
 
     def _mode_callback(self, msg: String) -> None:
         requested_mode = msg.data.strip().lower()
@@ -131,6 +146,9 @@ class CommandMux(Node):
         zero = Twist()
         if self.estop or self.mode == "hold":
             return zero, "hold"
+        if self.require_localization and (not self._localization_allowed or
+                                         not self._is_fresh(self._localization_stamp, 0.1)):
+            return zero, "hold"
 
         has_nav = self._is_fresh(self._nav_stamp, self.nav_timeout_sec) and self._nav_cmd is not None
         has_teleop = self._is_fresh(self._teleop_stamp, self.teleop_timeout_sec) and self._teleop_cmd is not None
@@ -148,6 +166,8 @@ class CommandMux(Node):
 
     def _limit_twist(self, msg: Twist) -> Twist:
         limited = Twist()
+        if not math.isfinite(msg.linear.x) or not math.isfinite(msg.angular.z):
+            return limited
         limited.linear.x = self._clamp(msg.linear.x * self.linear_scale, -self.max_linear_x, self.max_linear_x)
         limited.linear.y = 0.0
         limited.linear.z = 0.0

@@ -21,6 +21,9 @@ def generate_launch_description() -> LaunchDescription:
     slam_base_offset_y = LaunchConfiguration("slam_base_offset_y")
     slam_base_yaw_offset = LaunchConfiguration("slam_base_yaw_offset")
     robot_namespace = LaunchConfiguration("robot_namespace")
+    nav_to_pose_bt_xml = PathJoinSubstitution(
+        [FindPackageShare("astrobot_launch"), "behavior_trees", "navigate_to_pose_lunar_recovery.xml"]
+    )
 
     return LaunchDescription(
         [
@@ -39,12 +42,16 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("slam_base_offset_x", default_value="0.264"),
             DeclareLaunchArgument("slam_base_offset_y", default_value="0.017"),
             DeclareLaunchArgument("slam_base_yaw_offset", default_value="3.141592653589793"),
-            DeclareLaunchArgument("crop_min_x", default_value="0.20"),
-            DeclareLaunchArgument("crop_max_x", default_value="0.80"),
+            # Self-filter box FLIPPED for the front+lower LiDAR re-mount (2026-06-13) -- must match
+            # phase2_slam. phase3_nav declares these and passes them DOWN into the phase2_slam
+            # include (overriding phase2's defaults), so the OLD forward box here would clip the
+            # forward rocks the re-mount exists to see. Body is now behind the front sensor.
+            DeclareLaunchArgument("crop_min_x", default_value="-0.95"),
+            DeclareLaunchArgument("crop_max_x", default_value="0.05"),
             DeclareLaunchArgument("crop_min_y", default_value="-0.45"),
             DeclareLaunchArgument("crop_max_y", default_value="0.45"),
-            DeclareLaunchArgument("crop_min_z", default_value="-0.35"),
-            DeclareLaunchArgument("crop_max_z", default_value="0.05"),
+            DeclareLaunchArgument("crop_min_z", default_value="-0.30"),
+            DeclareLaunchArgument("crop_max_z", default_value="0.25"),
             DeclareLaunchArgument(
                 "nav2_params",
                 default_value=PathJoinSubstitution(
@@ -128,6 +135,8 @@ def generate_launch_description() -> LaunchDescription:
                             "autostart": autostart,
                             "nav2_params": nav2_params,
                             "basic_control_params": basic_control_params,
+                            "nav_to_pose_bt_xml": nav_to_pose_bt_xml,
+                            "require_localization": "true",
                         }.items(),
                     ),
                 ],

@@ -1,0 +1,6 @@
+uint64 epoch
+builtin_interfaces/Time minimum_stamp
+---
+bool success
+uint64 epoch
+string reason

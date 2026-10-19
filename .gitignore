@@ -10,3 +10,6 @@ astrobot-lab/log/
 rosbags/
 __pycache__/
 *.pyc
+node_modules/
+ui/**/dist/
+ui/**/*.tsbuildinfo

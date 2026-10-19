@@ -4,6 +4,7 @@ from launch.substitutions import LaunchConfiguration
 from launch.substitutions import PathJoinSubstitution
 from nav2_common.launch import RewrittenYaml
 from launch_ros.actions import Node, PushRosNamespace
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -13,10 +14,15 @@ def generate_launch_description() -> LaunchDescription:
     nav2_params = LaunchConfiguration("nav2_params")
     basic_control_params = LaunchConfiguration("basic_control_params")
     robot_namespace = LaunchConfiguration("robot_namespace")
+    nav_to_pose_bt_xml = LaunchConfiguration("nav_to_pose_bt_xml")
+    nav_through_poses_bt_xml = LaunchConfiguration("nav_through_poses_bt_xml")
     configured_nav2_params = RewrittenYaml(
         source_file=nav2_params,
         root_key=robot_namespace,
-        param_rewrites={},
+        param_rewrites={
+            "default_nav_to_pose_bt_xml": nav_to_pose_bt_xml,
+            "default_nav_through_poses_bt_xml": nav_through_poses_bt_xml,
+        },
         convert_types=True,
     )
     configured_basic_control_params = RewrittenYaml(
@@ -43,6 +49,15 @@ def generate_launch_description() -> LaunchDescription:
                     [FindPackageShare("astrobot_launch"), "config", "basic_control_phase1.yaml"]
                 ),
             ),
+            DeclareLaunchArgument("require_localization", default_value="false"),
+            DeclareLaunchArgument(
+                "nav_to_pose_bt_xml",
+                default_value="/opt/ros/jazzy/share/nav2_bt_navigator/behavior_trees/navigate_to_pose_w_replanning_and_recovery.xml",
+            ),
+            DeclareLaunchArgument(
+                "nav_through_poses_bt_xml",
+                default_value="/opt/ros/jazzy/share/nav2_bt_navigator/behavior_trees/navigate_through_poses_w_replanning_and_recovery.xml",
+            ),
             GroupAction(
                 [
                     PushRosNamespace(robot_namespace),
@@ -51,7 +66,8 @@ def generate_launch_description() -> LaunchDescription:
                         executable="command_mux",
                         name="command_mux",
                         output="screen",
-                        parameters=[configured_basic_control_params, {"use_sim_time": use_sim_time}],
+                        parameters=[configured_basic_control_params, {"use_sim_time": use_sim_time,
+                            "require_localization": ParameterValue(LaunchConfiguration("require_localization"), value_type=bool)}],
                     ),
                     Node(
                         package="nav2_planner",
@@ -94,6 +110,15 @@ def generate_launch_description() -> LaunchDescription:
                         name="behavior_server",
                         output="screen",
                         parameters=[configured_nav2_params],
+                        # CRITICAL: recoveries must flow through the same
+                        # smoother->mux chain as the controller. Without this remap
+                        # the behavior server published spin/backup commands onto
+                        # the FINAL robot cmd_vel topic, interleaved with the mux's
+                        # 20 Hz output (zeros while the controller is paused) ->
+                        # stuttering half-speed rotations that exceeded the spin
+                        # time allowance. Recoveries were silently crippled in
+                        # every phase until 2026-06-06 (user spotted it live).
+                        remappings=[("cmd_vel", "cmd_vel_raw")],
                     ),
                     Node(
                         package="nav2_lifecycle_manager",

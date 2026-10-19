@@ -14,7 +14,6 @@
     "publish_imu2lidar": false,
     "tf_time_offset": 0.000001,
     "extension_modules": [
-      "libmemory_monitor.so",
       "librviz_viewer.so"
     ],
     "imu_topic": "imu",

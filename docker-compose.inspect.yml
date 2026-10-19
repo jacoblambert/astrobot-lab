@@ -1,0 +1,59 @@
+# Opt-in GUI inspection. Never starts navigation or a terrain-v1 substitute.
+# Use together with lunaryard + archive overlays; start only named services.
+services:
+  astrobot-sim:
+    environment:
+      XAUTHORITY: /run/inspection.xauthority
+      XAUTHLOCALHOSTNAME: ${INSPECT_X11_HOSTNAME:-}
+      OMNILRS_HEADLESS: "false"
+      OMNILRS_ENVIRONMENT: lunaryard_40m
+      OMNILRS_ENVIRONMENT_SEED: "43"
+      OMNILRS_ROCKS_ENABLED: "true"
+      OMNILRS_NATURAL_HOLDOUT: "true"
+      OMNILRS_NATURAL_MOTION: ${INSPECT_ROUTE:-loop16}
+      OMNILRS_CAPTURE_EXECUTION_PROFILE: ${SELECTED_EXECUTION_PROFILE:-default}
+      OMNILRS_IMPORT_STAT_CACHE: ${INSPECT_IMPORT_STAT_CACHE:-true}
+      OMNILRS_SELECTED_LIDAR: "true"
+      ASTROBOT_SELECTED_LIDAR_PROFILE: ${ASTROBOT_SELECTED_LIDAR_PROFILE:-selected_generic_v1}
+      OMNILRS_PHYSICS_IMU: "true"
+      OMNILRS_GT_TF_ENABLED: "false"
+      OMNILRS_GT_MAP_ENABLED: "false"
+      OMNILRS_RESOURCE_ENABLED: "false"
+      OMNILRS_CAMERA_ENABLED: "false"
+      OMNILRS_TERRAIN_GT_PROBE: "false"
+      OMNILRS_TERRAIN_CALIBRATION: "false"
+      OMNILRS_TERRAIN_DRIVE: "false"
+      OMNILRS_TERRAIN_NATIVE_PUBLISH: ${INSPECT_TERRAIN_V2:-false}
+      OMNILRS_TERRAIN_NATIVE_CAPTURE: "false"
+      OMNILRS_TERRAIN_SHADOW: "false"
+    volumes:
+      - type: bind
+        source: ${XAUTHORITY:?Set XAUTHORITY to the current X11 session cookie file}
+        target: /run/inspection.xauthority
+        read_only: true
+        bind:
+          create_host_path: false
+
+  inspection-bridge:
+    image: astrobot-dev:latest
+    container_name: astrobot-inspection-bridge
+    # Bypass the development entrypoint's build/daemon cleanup, not ROS setup.
+    entrypoint: ["/bin/bash", "-lc"]
+    command:
+      - >-
+        source /etc/ros_setup.sh &&
+        source /workspace/astrobot-lab/astrobot-lab/install/setup.bash &&
+        exec ros2 run foxglove_bridge foxglove_bridge --ros-args
+        --params-file /config/foxglove_inspection.yaml
+    environment:
+      ROS_DOMAIN_ID: "177"
+      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+      CYCLONEDDS_URI: file:///config/cyclonedds_config.xml
+      ROS_LOG_DIR: /tmp/ros_log
+    volumes:
+      - ./:/workspace/astrobot-lab:ro
+      - ./config:/config:ro
+    networks: [ros2]
+    ipc: host
+    ports: ["127.0.0.1:8766:8766"]
+    restart: "no"

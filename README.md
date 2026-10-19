@@ -1,5 +1,10 @@
 # astrobot-lab
 
+Current development follows [Implementation plan v2 — local terrain](docs/implementation/implementation-plan-v2.md).
+See the [agent runbook](docs/implementation/agent-runbook.md) for test environments and guarded runners,
+and the [experiment ledger](docs/implementation/implementation-plan.md) for measured results and remaining gates.
+The local reconstruction prototype is offline/advisory; it is not connected to navigation.
+
 ## Quick Start
 
 ### 1. Prep the repo
@@ -182,10 +187,16 @@ Current rocks-enabled Phase 1 baseline, validated on 2026-04-26 in `docker-compo
 
 Phase 2 is validated as SLAM evaluation, not as GT-map localization. Nav2 still plans and controls from simulator GT `/gt/map` and GT `gt_map -> odom`; GLIM runs in parallel and is evaluated against true simulator pose and SLAM-frame revisit consistency. Phase 3 consumes a SLAM-derived BEV map and sends goals in the SLAM `map` frame.
 
-`astrobot-dev` installs GLIM from Koide's Jazzy/CUDA packages:
+`astrobot-dev` builds GLIM from source during the Docker image build:
 
-- `ros-jazzy-glim-ros-cuda12.6`
-- `cuda-cudart-12-6`
+- `astrobot-lab/src/glim` from `git@github.com:Open-Space-Systems/glim.git`
+- `astrobot-lab/src/glim_ros2` from `git@github.com:Open-Space-Systems/glim_ros2.git`
+- lower-level CUDA/GTSAM/gtsam_points dependencies from apt/Koide's PPA
+
+The built source overlay is installed at `/opt/astrobot/glim_source` and sourced by
+`/etc/ros_setup.sh` before the mounted workspace overlay. Runtime workspace
+auto-build skips `glim` and `glim_ros` by default because they are already built
+into the image.
 
 Start/recreate the Docker services. `astrobot-dev` auto-builds the mounted ROS
 overlay at container startup, so normal usage does not require a manual
@@ -221,13 +232,21 @@ Current rocks-collision Phase 2 validation baseline from 2026-05-10:
 Important Phase 2 details:
 
 - Simulator GT remains evaluation-only for SLAM metrics.
+- `/gt/map` is now the simulator rock-obstacle reference map only. The old
+  terrain mask/slope raster was misleading for rock validation and is no longer
+  published as the default GT map.
 - GLIM consumes `/astrobot_0/lidar_0/pointcloud/filtered`, generated from `/astrobot_0/lidar_0/pointcloud/raw` by a small crop-box filter that removes robot-body returns.
 - GLIM keeps raw points in its map output for visualization. Current mapping config reduces GLIM preprocessing/downsampling to preserve rock geometry (`downsample_resolution=0.25`, submap/global voxel resolution `0.25`).
 - `tools/record_phase2_bag.sh` records true simulator pose from `/gt/base_link_pose`.
 - Direct live-recorded TUM evaluation is currently the authoritative path. `ros2 bag play` replay can shift `/clock` on some recordings, which breaks timestamp matching for replay-generated GLIM poses.
-- GLIM `T_lidar_imu` is IMU-frame to LiDAR-frame; the current config uses simulator TF `vlp16 <- Imu_Sensor = [0.414, 0.017, -0.153, 0, 0, 1, 0]`.
-- 2026-05-24 Phase 4 failure isolation found the previous `+0.153` z sign caused GLIM's repeated IMU-prediction warnings and sudden multi-meter pose jumps during yaw-heavy exploration.
-- GLIM ROS pose is treated as IMU-frame for metric conversion; `slam_eval transform_tum` converts it to base-frame with `[0.264, 0.017, -0.262, yaw=pi]`.
+- GLIM `T_lidar_imu` is IMU-frame to LiDAR-frame; the current front-mounted LiDAR config uses simulator TF `vlp16 <- Imu_Sensor = [-0.136, 0.017, 0.012, 0, 0, 1, 0]`.
+- 2026-05-24 Phase 4 failure isolation found the previous rear-mount `+0.153` z sign caused GLIM's repeated IMU-prediction warnings and sudden multi-meter pose jumps during yaw-heavy exploration.
+- The source GLIM fork exposes `sensors.imu_gravity_magnitude`; the Lunaryard config sets it to `1.62` with `acc_scale=1.0`, avoiding the old binary `libglim.so` lunar-gravity patch.
+- 2026-05-30 Phase 4 hard-seed retesting found a second GLIM IMU issue: the
+  simulator IMU topic is near-zero at rest, so the previous `acc_scale=6.052`
+  over-scaled dynamic acceleration. The active profile now uses
+  `acc_scale=1.0` and `validate_imu=false`.
+- GLIM ROS pose is treated as IMU-frame for metric conversion; `slam_eval transform_tum` converts IMU to base-frame with `[0.264, 0.017, -0.262, yaw=pi]`. The simulator TF is `base_link -> Imu_Sensor = [0.264, 0.017, 0.262, yaw=pi]`.
 - For live Foxglove viewing, use fixed frame `map` and start with `/astrobot_0/slam/aligned_points_corrected`; `/astrobot_0/slam/glim_map` is GLIM's global-map PointCloud2 output and may update less continuously than the aligned local/submap cloud.
 - The packaged GLIM build does not include `libimu_validator.so`; use GLIM's built-in validation logs unless `glim_ext` is built from source.
 - Do not disable simulator GT TF or publish a SLAM-owned `map -> odom` while sending GT-map goals for Phase 2; that mixes coordinate frames and is intentionally not a supported path.
@@ -310,6 +329,17 @@ Phase 4 adds autonomous single-robot frontier exploration on top of Phase 3. It
 also publishes simulator-owned resource truth maps for scoring/visualization and
 entered-cell resource samples for autonomy.
 
+> **Gate status (2026-06-07):** the official PASS/FAIL comes from the GT-scored gate
+> harness — `tools/phase4_mission_gate_run.sh <seed> <mode>` per gate, or
+> `tools/phase4_gate_suite.sh` for the full seeds×modes matrix. Current matrix:
+> `sample_return` 2/3 (42 ✓, 411 ✗ residual SLAM accuracy, 7 ✓);
+> `explore_radius` 0/3 (dense-rock-cluster stall cascade). Full status, the change
+> log that got here (CPU GLIM, rocks-instancer fix, BEV mapper retune, recovery
+> wiring fix, …) and the remaining-blocker fix menu live in
+> `PHASE_DEFINITIONS.md` → Phase 4 → *Current status*; runnable commands in
+> `useful_cmds.md` → *Phase 4 gate harness & suite*. SLAM runs on **CPU GLIM** by
+> design (see `astrobot-lab/src/glim_slam_launch/config/glim_astrobot/README.md`).
+
 Deterministic resource smoke run:
 
 ```bash
@@ -347,10 +377,21 @@ Current Phase 4 status:
   - return home: succeeded
   - Nav2 failures: `0`
   - SLAM jumps: `0`
+- Latest 2026-05-30 hard seed `411` diagnostic retest:
+  - with old `acc_scale=6.052`, the 8 m / 80% explore run reproduced
+    multi-meter SLAM divergence
+  - with `validate_imu=false` only, GLIM warnings disappeared but drift still
+    returned
+  - with `validate_imu=false` and `acc_scale=1.0`, the same run stayed bounded
+    with max observed SLAM-vs-GT error about `0.62 m`
+  - it reached `27/51 = 51.9%` coverage before return-home/max-goal behavior;
+    remaining limitation appears to be exploration/reachability tuning, not
+    SLAM divergence
 
 Known Phase 4 limitations:
 - The full statistical gate of `3` randomized `explore_radius` and `3` randomized `sample_return` runs is not complete.
-- A larger 10 m / 80% hard-seed run still exposed late GLIM drift, so the current acceptance is intentionally partial.
+- The larger/harder coverage gate still needs to be rerun end-to-end with the
+  current GLIM IMU config and updated rock-only GT scoring.
 - Breadcrumb return-home works but can be inefficient on long routes.
 - UI/tooling is the next step so resource maps, sampled cells, candidate scores, return state, and diagnostics are visible during longer tests.
 
@@ -362,6 +403,7 @@ Phase 4 topics to visualize:
 /astrobot_0/resource/water/sample_pose
 /astrobot_0/exploration/frontiers
 /astrobot_0/exploration/selected_goal
+/astrobot_0/exploration/events
 /astrobot_0/exploration/status
 /astrobot_0/exploration/mission_grid
 /astrobot_0/diagnostics
@@ -369,7 +411,51 @@ Phase 4 topics to visualize:
 /astrobot_0/navigate_to_pose/_action/status
 ```
 
-### 11. Optional local GUI smoke test
+The Phase 4 gate harness now writes per-attempt navigation artifacts by default
+under `rosbags/phase4_gate_artifacts/`, including `goal_events.jsonl`,
+`diagnostics.jsonl`, TUM traces, and stall/spin costmap snapshots. Summarize them
+with `python3 tools/phase4_nav_diagnostics_summary.py rosbags/phase4_gate_suite.json`.
+
+### 11. Phase 5 mission console prototype
+
+The custom GUI is now split into:
+- `astrobot_ui_backend`: ROS 2 + FastAPI read-only bridge.
+- `ui/astrobot-console`: Vite React frontend with mock telemetry fallback.
+
+Run the frontend-only mockup locally:
+
+```bash
+cd ui/astrobot-console
+npm install
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:5173
+```
+
+To view live ROS state, start Phase 4/Phase 5 autonomy first, then launch the
+UI backend in `astrobot-dev`:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase5_gui.launch.py'
+```
+
+Then run `npm run dev` locally. The Vite dev server proxies `/api` and
+`/ws/telemetry` to `127.0.0.1:8080`.
+
+Current GUI scope:
+- BEV overlays: obstacle costmap, water resource map, mission grid, GT debug map.
+- Robot pose/icon, selected goal, optional past trajectory, and future plan.
+- Mission status and robot health/status badges.
+- Two diagnostics panels with compact time-series plots.
+- Three camera cards with topic availability placeholders; image streaming is a
+  follow-up item.
+
+### 12. Optional local Isaac Sim GUI smoke test
 
 ```bash
 xhost +local:root

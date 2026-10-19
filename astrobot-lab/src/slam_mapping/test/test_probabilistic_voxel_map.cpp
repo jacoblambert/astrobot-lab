@@ -339,6 +339,84 @@ void test_bev_projection_uses_low_ground_percentile_for_rock_core()
   require(cell_value(grid, 0.0, 0.0) >= 88, "rock core should stay high-cost with contaminated local ground samples");
 }
 
+void test_gpf_ground_marks_rock()
+{
+  // R-GPF (use_gpf_ground) must still mark a clear rock as obstacle (regression guard for the new path).
+  OccupancyConfig config;
+  config.voxel_size = 0.10;
+  config.hit_log_odds = 1.0;
+  config.occupied_threshold = 0.5;
+  config.point_stride = 1;
+  config.use_bounds = false;
+  ProbabilisticVoxelMap map(config);
+
+  const Point3 origin{0.0, -2.0, 0.8};
+  for (int scan = 0; scan < 3; ++scan) {
+    std::vector<Point3> points;
+    for (int ix = -5; ix <= 5; ++ix) {
+      for (int iy = -5; iy <= 5; ++iy) {
+        const double x = ix * 0.10, y = iy * 0.10;
+        // a 0.3 m-tall rock occupying the central 3x3 (~0.3 m) on flat ground
+        const bool rock = (-1 <= ix && ix <= 1 && -1 <= iy && iy <= 1);
+        points.push_back(Point3{x, y, rock ? 0.30 : 0.0});
+      }
+    }
+    map.integratePointCloud(origin, points);
+  }
+
+  BevProjectionConfig bev;
+  bev.resolution = 0.10;
+  bev.width_m = 4.0; bev.height_m = 4.0; bev.origin_x = -2.0; bev.origin_y = -2.0;
+  bev.ground_window_radius = 2;
+  bev.obstacle_height = 0.12;
+  bev.lethal_obstacle_height = 0.35;
+  bev.obstacle_inflation_radius = 0.0;
+  bev.min_occupied_voxels_per_cell = 1;
+  bev.use_gpf_ground = true;
+  bev.use_ground_floor = false;
+  const auto grid = map.projectToBev(bev);
+  require(cell_value(grid, 0.0, 0.0) >= 88, "R-GPF should mark the rock core as obstacle");
+}
+
+void test_gpf_ground_keeps_smooth_slope_free()
+{
+  // The KEY precision guard: a steep but SMOOTH slope (no rock) must stay free under R-GPF -- this is
+  // exactly where the wide low-floor over-marked (read curvature as obstacles). R-GPF's per-window plane
+  // fit absorbs a linear slope, so the residual height is ~0.
+  OccupancyConfig config;
+  config.voxel_size = 0.10;
+  config.hit_log_odds = 1.0;
+  config.occupied_threshold = 0.5;
+  config.point_stride = 1;
+  config.use_bounds = false;
+  ProbabilisticVoxelMap map(config);
+
+  const Point3 origin{-2.0, 0.0, 1.0};
+  for (int scan = 0; scan < 3; ++scan) {
+    std::vector<Point3> points;
+    for (int ix = -10; ix <= 10; ++ix) {
+      for (int iy = -10; iy <= 10; ++iy) {
+        const double x = ix * 0.10, y = iy * 0.10;
+        points.push_back(Point3{x, y, 0.40 * x});  // uniform 0.40 rise/run (~22 deg) smooth ramp
+      }
+    }
+    map.integratePointCloud(origin, points);
+  }
+
+  BevProjectionConfig bev;
+  bev.resolution = 0.10;
+  bev.width_m = 4.0; bev.height_m = 4.0; bev.origin_x = -2.0; bev.origin_y = -2.0;
+  bev.ground_window_radius = 2;
+  bev.obstacle_height = 0.12;
+  bev.lethal_obstacle_height = 0.35;
+  bev.obstacle_inflation_radius = 0.0;
+  bev.min_occupied_voxels_per_cell = 1;
+  bev.use_gpf_ground = true;
+  bev.use_ground_floor = false;
+  const auto grid = map.projectToBev(bev);
+  require(cell_value(grid, 0.0, 0.0) < 65, "R-GPF must NOT mark a smooth slope as an obstacle");
+}
+
 }  // namespace
 
 int main()
@@ -353,6 +431,8 @@ int main()
   test_bev_projection_adds_traversable_terrain_risk();
   test_bev_projection_inflation_tapers_with_distance();
   test_bev_projection_uses_low_ground_percentile_for_rock_core();
+  test_gpf_ground_marks_rock();
+  test_gpf_ground_keeps_smooth_slope_free();
   std::cout << "probabilistic voxel map tests passed" << std::endl;
   return 0;
 }

@@ -1,0 +1,215 @@
+# astrobot-lab current commands: Phase 5 test workflow
+
+This is the short reference for running the current Lunaryard stack with the
+Phase 5 GUI. The active robot namespace is `/astrobot_0`; ROS uses
+`ROS_DOMAIN_ID=177`; Foxglove bridge is `ws://127.0.0.1:8765`; GUI backend is
+`http://127.0.0.1:8080`; React dev UI is `http://127.0.0.1:5173`.
+
+## 0. Bring up Lunaryard
+
+Headless, rocks enabled, default seed:
+
+```bash
+OMNILRS_ROCKS_ENABLED=true \
+OMNILRS_GT_TF_ENABLED=false \
+docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
+```
+
+Visible Isaac Sim window:
+
+```bash
+xhost +local:root
+DISPLAY=${DISPLAY:-:0} \
+OMNILRS_HEADLESS=false \
+OMNILRS_ROCKS_ENABLED=true \
+OMNILRS_GT_TF_ENABLED=false \
+docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
+```
+
+Useful seed/resource overrides:
+
+```bash
+DISPLAY=${DISPLAY:-:0} \
+OMNILRS_HEADLESS=false \
+OMNILRS_ENVIRONMENT_SEED=411 \
+OMNILRS_RESOURCE_MODE=random \
+OMNILRS_RESOURCE_SEED=411 \
+OMNILRS_ROCKS_ENABLED=true \
+OMNILRS_GT_TF_ENABLED=false \
+docker compose -f docker-compose.lunaryard.yml up -d --force-recreate
+```
+
+Open a dev shell:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash
+```
+
+## 1. Start Foxglove bridge
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec -d astrobot-dev bash -lc 'source /etc/ros_setup.sh && exec ros2 launch foxglove_bridge foxglove_bridge_launch.xml address:=0.0.0.0 port:=8765'
+```
+
+Connect Foxglove Desktop or Web to:
+
+```text
+ws://127.0.0.1:8765
+```
+
+Remote tunnel, if needed:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 -L 8080:127.0.0.1:8080 -L 5173:127.0.0.1:5173 <user>@<remote-host>
+```
+
+Foxglove fixed frame: `map`
+
+Core topics:
+
+```text
+/astrobot_0/slam/pose_corrected
+/astrobot_0/slam/bev_costmap
+/astrobot_0/slam/prob_voxel_map
+/astrobot_0/slam/aligned_points_corrected
+/astrobot_0/exploration/status
+/astrobot_0/exploration/events
+/astrobot_0/exploration/selected_goal
+/astrobot_0/exploration/frontiers
+/astrobot_0/diagnostics
+/astrobot_0/plan
+/astrobot_0/cmd_vel
+/astrobot_0/lidar_0/pointcloud/raw
+/astrobot_0/lidar_0/pointcloud/filtered
+/astrobot_0/imu
+/gt/map
+/gt/base_link_pose
+/gt/resource_maps/water
+```
+
+`/gt/*` is for UI/debug/evaluation, except the synthetic RTK/beacon path uses
+`/gt/base_link_pose` to generate `/rtk/pose` when `start_synthetic_rtk:=true`.
+
+## 2. Launch a Phase 5 mission stack
+
+These launches start Phase 3 nav + Phase 4 mission logic. Run one at a time.
+
+Sample-return mission:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase4_exploration.launch.py mission_mode:=sample_return sample_success_threshold:=0.75 home_radius_m:=8.0 max_duration_sec:=1200.0'
+```
+
+Explore-radius mission:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase4_exploration.launch.py mission_mode:=explore_radius coverage_goal_fraction:=0.70 home_radius_m:=8.0 mission_cell_size_m:=2.0 max_goal_distance_m:=8.0 max_duration_sec:=1200.0'
+```
+
+Teleop-click mission:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase4_exploration.launch.py mission_mode:=teleop_click home_radius_m:=8.0 max_duration_sec:=3600.0'
+```
+
+## 3. Launch the Phase 5 GUI backend
+
+In another terminal:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase5_gui.launch.py'
+```
+
+Backend checks:
+
+```bash
+curl http://127.0.0.1:8080/api/health
+curl http://127.0.0.1:8080/api/state | jq '.robots[0], .mission'
+```
+
+Do not open `http://127.0.0.1:8080/` as the UI page. It is API-only, so the
+root path returning `{"detail":"Not Found"}` is normal.
+
+## 4. Run the React GUI
+
+Run locally on the host:
+
+```bash
+cd ui/astrobot-console
+npm run dev -- --host 127.0.0.1
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173
+```
+
+The Vite dev server proxies `/api` and `/ws` to the backend on
+`127.0.0.1:8080`.
+
+Teleop-click usage:
+
+```text
+1. Launch mission_mode:=teleop_click.
+2. Launch phase5_gui.launch.py.
+3. Open http://127.0.0.1:5173.
+4. Enable "Teleop click" on the BEV panel.
+5. Click a reachable point on the obstacle map.
+```
+
+Direct teleop API test:
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/robots/astrobot_0/teleop_goal \
+  -H 'Content-Type: application/json' \
+  -d '{"x": 4.0, "y": 2.0, "yaw": 0.0, "frame_id": "map"}'
+```
+
+## 5. Quick ROS checks
+
+List high-value topics:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && ros2 topic list | sort | grep -E "astrobot_0/(slam|exploration|diagnostics|resource|cmd_vel|plan|imu|lidar)|/gt/|/rtk"'
+```
+
+Watch mission status:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && ros2 topic echo /astrobot_0/exploration/status'
+```
+
+Watch diagnostics:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && ros2 topic echo /astrobot_0/diagnostics'
+```
+
+Manual Nav2 goal, if exploration is not running:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
+  'source /etc/ros_setup.sh && ros2 action send_goal /astrobot_0/navigate_to_pose nav2_msgs/action/NavigateToPose "{pose: {header: {frame_id: map}, pose: {position: {x: 4.0, y: 2.0, z: 0.0}, orientation: {w: 1.0}}}}"'
+```
+
+## 6. Stop
+
+Stop everything:
+
+```bash
+docker compose -f docker-compose.lunaryard.yml down
+```
+
+Hard cleanup of stopped containers only:
+
+```bash
+docker container prune
+```

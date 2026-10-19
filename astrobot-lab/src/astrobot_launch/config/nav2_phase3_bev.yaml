@@ -36,7 +36,8 @@ behavior_server:
       plugin: "nav2_behaviors::BackUp"
     wait:
       plugin: "nav2_behaviors::Wait"
-    global_frame: odom
+    global_frame: map
+    local_frame: map
     robot_base_frame: base_link
     transform_tolerance: 0.2
     simulate_ahead_time: 1.0
@@ -64,7 +65,7 @@ controller_server:
     general_goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
       stateful: true
-      xy_goal_tolerance: 0.50
+      xy_goal_tolerance: 0.65
       yaw_goal_tolerance: 6.28
     # MPPI sampling-based controller (replaces RotationShim+RPP). Plans smooth
     # trajectories directly, including in-place rotation, with no rotation shim;
@@ -75,12 +76,12 @@ controller_server:
       plugin: "nav2_mppi_controller::MPPIController"
       time_steps: 40
       model_dt: 0.1
-      batch_size: 1000
+      batch_size: 2000
       vx_std: 0.2
       vy_std: 0.0
       wz_std: 0.4
       vx_max: 0.18
-      vx_min: 0.0
+      vx_min: -0.05
       wz_max: 0.8
       iteration_count: 1
       prune_distance: 1.7
@@ -116,15 +117,15 @@ controller_server:
       CostCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 3.81
-        critical_cost: 300.0
+        cost_weight: 9.0
+        critical_cost: 80.0
         consider_footprint: true
         collision_cost: 1000000.0
         near_goal_distance: 1.0
       PathAlignCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 14.0
+        cost_weight: 8.0
         max_path_occupancy_ratio: 0.05
         trajectory_point_step: 4
         threshold_to_consider: 0.5
@@ -164,7 +165,7 @@ planner_server:
       max_iterations: 1000000
       max_on_approach_iterations: 1000
       max_planning_time: 2.0
-      cost_travel_multiplier: 8.0
+      cost_travel_multiplier: 14.0
       smooth_path: true
 
 global_costmap:
@@ -179,7 +180,7 @@ global_costmap:
       resolution: 0.10
       track_unknown_space: true
       footprint: "[[0.495, 0.335], [0.495, -0.335], [-0.495, -0.335], [-0.495, 0.335]]"
-      footprint_padding: 0.08
+      footprint_padding: 0.10
       always_send_full_costmap: true
       plugins: ["static_layer", "inflation_layer"]
       static_layer:
@@ -191,17 +192,28 @@ global_costmap:
         unknown_cost_value: -1
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        # BEV voxel mapper already inflates obstacles (~0.85m). Keep Nav2
-        # inflation small (footprint clearance margin) to avoid double-inflation
-        # walling the rover into corridors; MPPI CostCritic handles avoidance.
-        cost_scaling_factor: 2.5
-        inflation_radius: 0.45
+        # Keep a conservative local clearance margin for rocks. The rover can
+        # high-center before the BEV obstacle core reaches the footprint, so
+        # inflated shoulders are treated as expensive by MPPI and Smac.
+        # MUST be >= the robot circumscribed radius (0.737m = footprint corner
+        # sqrt(0.595^2+0.435^2) with 0.10 padding); below it, Nav2 disables the
+        # potential-field collision optimization -> a computeCircumscribedCost
+        # ERROR flood that chokes the controller (was set to 0.60 -> stalled the
+        # seed-42 return). The mapper's own inflation is now 0 (phase2_slam), so
+        # this single layer owns clearance; the hard collision bound is the
+        # footprint either way -- inflation only adds the soft avoidance band.
+        cost_scaling_factor: 2.0
+        inflation_radius: 0.75
 
 local_costmap:
   local_costmap:
     ros__parameters:
       use_sim_time: true
-      global_frame: odom
+      # The local costmap is also backed by the persistent SLAM BEV static map.
+      # Keep it in map frame so the StaticLayer samples the BEV grid directly;
+      # using odom left the controller with mostly free/unknown local costs in
+      # rock corridors while the global planner saw the map.
+      global_frame: map
       robot_base_frame: base_link
       update_frequency: 10.0
       publish_frequency: 2.0
@@ -212,7 +224,7 @@ local_costmap:
       rolling_window: true
       track_unknown_space: true
       footprint: "[[0.495, 0.335], [0.495, -0.335], [-0.495, -0.335], [-0.495, 0.335]]"
-      footprint_padding: 0.08
+      footprint_padding: 0.10
       always_send_full_costmap: true
       plugins: ["static_layer", "inflation_layer"]
       static_layer:
@@ -224,11 +236,10 @@ local_costmap:
         unknown_cost_value: -1
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        # BEV voxel mapper already inflates obstacles (~0.85m). Keep Nav2
-        # inflation small (footprint clearance margin) to avoid double-inflation
-        # walling the rover into corridors; MPPI CostCritic handles avoidance.
-        cost_scaling_factor: 2.5
-        inflation_radius: 0.45
+        # Match the global costmap clearance margin; local MPPI should avoid
+        # inflated shoulders, not only lethal obstacle cores.
+        cost_scaling_factor: 2.0
+        inflation_radius: 0.75
 
 velocity_smoother:
   ros__parameters:

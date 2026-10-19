@@ -2,3 +2,9 @@
 	path = OmniLRS
 	url = git@github.com:jacoblambert/OmniLRS.git
 	branch = astrobot/phase1-lunaryard-baseline
+[submodule "astrobot-lab/src/glim"]
+	path = astrobot-lab/src/glim
+	url = git@github.com:Open-Space-Systems/glim.git
+[submodule "astrobot-lab/src/glim_ros2"]
+	path = astrobot-lab/src/glim_ros2
+	url = git@github.com:Open-Space-Systems/glim_ros2.git

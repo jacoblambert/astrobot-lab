@@ -1,0 +1,27 @@
+/**:
+  ros__parameters:
+    port: 8766
+    address: "0.0.0.0" # Docker exposes this on HOST LOOPBACK ONLY.
+    use_sim_time: true
+    # No commands, services, parameters or file/asset access from the UI.
+    capabilities: [connectionGraph]
+    client_topic_whitelist: ['a^']
+    service_whitelist: ['a^']
+    param_whitelist: ['a^']
+    asset_uri_allowlist: ['a^']
+    num_threads: 2
+    min_qos_depth: 1
+    max_qos_depth: 2
+    send_buffer_limit: 10000000
+    topic_whitelist:
+      - '^/clock$'
+      - '^/tf(_static)?$'
+      - '^/gt/base_link_pose$'
+      - '^/rtk/pose$'
+      - '^/astrobot_0/(cmd_vel|odom|imu|imu_physics)$'
+      - '^/astrobot_0/imu_physics/clock$'
+      - '^/astrobot_0/lidar_selected/points$'
+      - '^/astrobot_0/slam_raw/.*$'
+      - '^/astrobot_0/slam/(pose_corrected|lidar_pose_corrected|aligned_points_corrected)$'
+      - '^/astrobot_0/localization/(absolute_pose|status)$'
+      - '^/terrain_shadow/(request|grant|status|costmap|classes|native_chunks|native_complete)$'

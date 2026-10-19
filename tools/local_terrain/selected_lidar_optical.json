@@ -1,0 +1,19 @@
+{
+  "schema": "selected_single_lidar_v1",
+  "layout": "mid_dense_10_to_-60",
+  "status": "optical_origin_audited_not_moving_or_navigation_qualified",
+  "base_from_lidar_translation_m": [0.4, 0.0, 0.45],
+  "mount_rpy_deg": [0.0, 0.0, 0.0],
+  "elevation_bands_deg": [[10.0, 0.0, 5], [-2.0, -30.0, 20], [-35.0, -60.0, 7]],
+  "elevation_convention": "sensor_local_positive_up",
+  "horizontal_columns": 1999,
+  "horizontal_resolution_deg": 0.18000000715255737,
+  "horizontal_start_rad": -3.141592653589793,
+  "rotation_hz": 10.0,
+  "raycast_min_range_m": 0.0,
+  "chassis_exclusion_base_aabb_m": [[-0.5047, -0.28645, -0.00977], [0.5047, 0.28645, 0.25973]],
+  "min_range_m": 0.5,
+  "max_range_m": 100.0,
+  "native_backend": "isaac_generic_explicit_rays",
+  "note": "Separate corrected experiment. Cast from optical origin so near occluders cannot be bypassed; software measurement minimum remains 0.5 m. Original selected_lidar.json stays frozen."
+}

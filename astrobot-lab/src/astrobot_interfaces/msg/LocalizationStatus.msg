@@ -1,0 +1,13 @@
+uint8 STARTING=0
+uint8 HEALTHY=1
+uint8 DEGRADED=2
+uint8 STOPPING=3
+uint8 REINITIALIZING=4
+uint8 REBUILDING=5
+uint8 FAULTED=6
+std_msgs/Header header
+uint64 epoch
+uint8 state
+bool motion_permitted
+builtin_interfaces/Time last_pose_stamp
+string reason

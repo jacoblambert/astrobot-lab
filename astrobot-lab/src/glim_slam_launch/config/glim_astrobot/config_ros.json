@@ -1,21 +1,23 @@
 {
   "glim_ros": {
+    "publish_odometry_tf": false,
     "enable_local_mapping": true,
     "enable_global_mapping": true,
     "keep_raw_points": true,
     "imu_time_offset": 0.0,
     "points_time_offset": 0.0,
-    "acc_scale": 6.052,
+    "acc_scale": 1.0,
     "imu_frame_id": "Imu_Sensor",
     "lidar_frame_id": "vlp16",
     "base_frame_id": "",
     "odom_frame_id": "slam_odom",
     "map_frame_id": "map",
     "publish_imu2lidar": false,
-    "tf_time_offset": 0.000001,
+    "tf_time_offset": 1e-06,
     "extension_modules": [
-      "libmemory_monitor.so",
-      "librviz_viewer.so"
+      "librviz_viewer.so",
+      "librevision_module.so",
+      "libabs_constraint_module.so"
     ],
     "imu_topic": "imu",
     "points_topic": "lidar_0/pointcloud/filtered",
@@ -32,5 +34,21 @@
       "profile": "sensor_data",
       "depth": 10
     }
+  },
+  "abs_constraint": {
+    "_comment": "Absolute-position + heading (synthetic RTK / surface beacon + GNSS-compass) fusion into GLIM odometry. Position-only GPSFactor + yaw-only PriorFactor on the live pose key X(current), matched by timestamp to /rtk/pose. Requires odometry_estimation.init_T_world_imu pinning so the measurement is a direct world prior. VALIDATED: arrests catastrophic feature-poor GICP divergence (9480m->~1m on seed411_sparse_explore) with the ORIGINAL GLIM (no core mods). 'Full authority' = gate_dist=0 + huber_k=0: RTK is trusted strongly enough to overrule a diverging GICP. CAVEAT: gate/huber=0 gives NO protection against a genuinely bad RTK fix -- for hardware add a kinematic (RTK-to-RTK) plausibility gate before relying on this in production.",
+    "enable": true,
+    "rtk_topic": "/rtk/pose",
+    "assoc_tolerance": 0.05,
+    "gate_dist": 0.0,
+    "huber_k": 0.0,
+    "_comment_sigma": "Use validated measurement covariance, with a 5 cm lower sigma bound. The supervisor checks source plausibility and publishes the accepted absolute_pose topic; one fix constrains at most one live pose key.",
+    "sigma_floor": 0.05,
+    "use_msg_covariance": true,
+    "_comment_yaw": "Absolute heading (GNSS-compass / dual-antenna). Adds a yaw-only PriorFactor on X(i), independent of the position gate, so a measured heading can correct a wrong frame yaw (the axis LiDAR-IMU observes worst). yaw_huber_k=0 => heading un-robustified so a trustworthy compass can bootstrap-correct a bad frame.",
+    "use_yaw": true,
+    "yaw_huber_k": 0.0,
+    "yaw_sigma_floor": 0.01,
+    "yaw_cov_threshold": 1.0
   }
 }

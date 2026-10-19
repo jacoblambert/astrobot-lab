@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Repository-grounded guide to AstroBot simulation, GLIM, terrain mapping, frames, guarded motion and validation. September 22, 2026 snapshot.">
+  <title>AstroBot • System field guide</title>
+  <style>
+    :root{--ink:#172e3b;--muted:#536873;--paper:#f4f6f5;--panel:#fff;--line:#d9e2e3;--nav:#102c37;--teal:#08796f;--blue:#245ca8;--amber:#925600;--red:#a63539;--mono:ui-monospace,SFMono-Regular,Consolas,monospace;--radius:15px}
+    *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.65 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--blue);text-underline-offset:3px}a:hover{color:var(--teal)}button,input{font:inherit}button{cursor:pointer}button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #d49a35;outline-offset:4px}.skip{position:absolute;left:12px;top:-80px;background:white;padding:12px;z-index:5}.skip:focus{top:12px}
+    .sidebar{position:fixed;inset:0 auto 0 0;width:250px;padding:32px 24px;background:var(--nav);color:#dcebea;overflow:auto}.brand{font-weight:800;font-size:22px;letter-spacing:-.7px;color:white}.brand span{color:#77d9c2}.sidebar p{font-size:13px;color:#b1c8ce;line-height:1.5}.sidebar nav{display:grid;gap:4px;margin-top:28px}.sidebar nav a{font-size:14px;text-decoration:none;padding:7px 10px;border-radius:6px;color:#d3e4e8}.sidebar nav a:hover,.sidebar nav a[aria-current="location"]{background:#25434d;color:white}.sidebar .nav-note{border-top:1px solid #34505a;margin-top:25px;padding-top:18px}.sidebar .nav-note a{color:#90dccc}
+    main{margin-left:250px;padding:40px clamp(22px,4vw,70px) 80px;max-width:1550px}.hero{background:var(--nav);color:white;padding:clamp(24px,4vw,48px);border-radius:20px;position:relative;overflow:hidden}.eyebrow{text-transform:uppercase;font-size:11px;letter-spacing:1.8px;font-weight:800;color:var(--teal)}.hero .eyebrow{color:#95dccc}.hero h1{font-size:clamp(32px,4vw,52px);line-height:1.1;letter-spacing:-1.8px;margin:18px 0}.hero p{max-width:750px;color:#d6e4e8;font-size:18px}.hero .meta{font-size:13px;color:#acc5cd}.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}.pill,.tag{display:inline-block;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:800;letter-spacing:.3px;vertical-align:middle}.hero .pill{border:1px solid #57717b;color:#e5f2f1}.tag{background:#e5f3ef;color:#086658}.tag.warn{background:#fff0d5;color:#885200}.tag.bad{background:#fbe9e8;color:#962c31}.tag.neutral{background:#e9eef3;color:#425773}
+    section{margin-top:52px}section>h2{font-size:29px;line-height:1.25;letter-spacing:-.8px;margin:8px 0 20px}h3{font-size:19px;line-height:1.35;margin:22px 0 10px}h4{margin:18px 0 6px}p{margin:10px 0 15px}.lead{font-size:18px;max-width:920px;color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}.card{border:1px solid var(--line);background:var(--panel);border-radius:var(--radius);padding:22px;min-width:0}.card h3:first-child{margin-top:0}.stat{font-size:36px;line-height:1.2;font-weight:750;letter-spacing:-1px;margin:10px 0}.stat small{font-size:17px;color:var(--muted);font-weight:500;letter-spacing:0}.caption,.fine{color:var(--muted);font-size:13px}.callout{padding:18px 22px;border-left:4px solid var(--teal);background:#e8f3f0;border-radius:0 10px 10px 0;margin:20px 0}.callout.warn{border-color:#b97b1f;background:#fff3dc}.callout.bad{border-color:var(--red);background:#faecea}.callout p:last-child,.card p:last-child{margin-bottom:0}.callout strong{display:block;margin-bottom:5px}ul,ol{padding-left:23px}li{margin:7px 0}code{font-family:var(--mono);font-size:.85em;background:#e9eef0;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#132e39;color:#e2eeed;padding:20px;border-radius:10px;font-size:12px;line-height:1.7;margin:12px 0}pre code{background:none;color:inherit;padding:0;font-size:inherit}.command{position:relative}.command pre{padding-top:45px}.copy{position:absolute;top:9px;right:10px;border:1px solid #54717b;color:#e1f0ed;background:#264650;border-radius:5px;padding:3px 10px;font-size:12px}.copy:disabled{cursor:default}.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;margin:18px 0;background:white}table{width:100%;border-collapse:collapse;font-size:14px;text-align:left}th{background:#eaf0f1;color:#334f5b;font-size:12px;letter-spacing:.4px;padding:13px 15px}td{padding:13px 15px;vertical-align:top;border-top:1px solid #e4ebed}td:first-child{font-weight:600}tr[hidden]{display:none}table code{font-size:11px}details{border:1px solid var(--line);border-radius:10px;background:white;margin:12px 0;padding:0 18px}summary{cursor:pointer;padding:15px 0;font-weight:650}details[open]{padding-bottom:15px}.flow{display:grid;grid-template-columns:1fr 35px 1fr 35px 1fr;align-items:stretch;gap:8px;margin:20px 0}.node{border:1px solid #bed2d5;border-radius:12px;padding:20px;background:white;min-width:0}.node strong{display:block}.node p{font-size:13px;margin-bottom:0}.arrow{display:grid;place-items:center;color:var(--teal);font-size:26px}.node.active{background:#e9f6f1;border-color:#9bcebf}.node.legacy{background:#edf0f6;border-color:#c3cbdd}.lanes{display:grid;gap:16px}.lane{padding:20px;border:1px solid var(--line);border-radius:14px;background:#edf2f3}.lane h3{margin:0}.lane .flow{margin-bottom:0}.searchbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:18px 0}.searchbar label{font-weight:650;font-size:14px}.searchbar input{flex:1;min-width:200px;max-width:550px;border:1px solid #aebfc5;border-radius:8px;padding:10px 13px;background:white}.searchbar output{font-size:13px;color:var(--muted)}.diagram{background:white;border:1px solid var(--line);border-radius:14px;padding:20px;margin:18px 0;overflow-x:auto}.diagram svg{display:block;max-width:100%;height:auto;margin:auto}.legend{display:flex;flex-wrap:wrap;gap:18px;font-size:12px;color:var(--muted);margin-top:10px}.dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px}.steps{counter-reset:steps;display:grid;gap:12px}.step{position:relative;background:white;border:1px solid var(--line);border-radius:12px;padding:18px 20px 18px 62px;counter-increment:steps}.step:before{content:counter(steps);position:absolute;left:18px;top:20px;background:var(--teal);color:white;border-radius:50%;width:28px;height:28px;text-align:center;font-weight:700}.step h3{margin:0 0 6px}.step p{margin:0}.statusline{border-top:1px solid var(--line);margin-top:22px;padding-top:14px;font-size:13px}.source-list{font-size:14px}.source-list code{font-size:12px}.source-list a{font-weight:650}.linkrow{display:flex;gap:15px;flex-wrap:wrap}footer{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}[hidden]{display:none!important}
+    @media(max-width:1100px){.sidebar{width:210px;padding:25px 16px}main{margin-left:210px;padding:28px 25px}.grid.three{grid-template-columns:1fr}.flow{grid-template-columns:1fr}.arrow{transform:rotate(90deg);height:26px}.stat{font-size:30px}}
+    @media(max-width:760px){.sidebar{position:static;width:auto;padding:20px}.sidebar nav{display:flex;overflow-x:auto;gap:8px;margin-top:16px}.sidebar nav a{white-space:nowrap}.sidebar>p,.sidebar .nav-note{display:none}main{margin-left:0;padding:18px 15px 40px}.grid{grid-template-columns:1fr}section{margin-top:38px}.hero{padding:26px}.hero h1{font-size:36px}.diagram{padding:10px}.diagram svg{min-width:620px}.table-wrap table{min-width:650px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+    @media print{.sidebar,.copy,.searchbar,.skip{display:none}main{margin:0;max-width:none;padding:0}.hero{background:white;color:var(--ink);border:1px solid var(--line)}.hero p,.hero .meta,.hero .eyebrow{color:var(--ink)}.hero .pill{color:var(--ink);border-color:var(--line)}section{break-inside:auto}.card,.callout,.diagram{break-inside:avoid}a{color:inherit}.table-wrap{overflow:visible}pre{background:#eef2f2;color:var(--ink)}details{display:block}body{font-size:11pt}.grid.three{grid-template-columns:repeat(3,1fr)}}
+  </style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<aside class="sidebar" aria-label="Guide navigation">
+  <div class="brand">astrobot<span> / lab</span></div>
+  <p>System field guide<br>Architecture → evidence → testing</p>
+  <nav>
+    <a href="#status">01 · Current status</a><a href="#architecture">02 · System architecture</a>
+    <a href="#topics">03 · ROS topic flow</a><a href="#frames">04 · Frames &amp; extrinsics</a>
+    <a href="#timing">05 · Timing &amp; revisions</a><a href="#terrain">06 · Terrain algorithm</a>
+    <a href="#motion">07 · Driving &amp; safeguards</a><a href="#evidence">08 · Results &amp; limitations</a>
+    <a href="#code">09 · Critical code</a><a href="#testing">10 · Test &amp; demo runbook</a>
+    <a href="#failures">11 · Failure diagnosis</a><a href="#next">12 · Next integration gates</a>
+  </nav>
+  <p class="nav-note">Snapshot: <strong>22 September 2026</strong><br>Read with the <a href="implementation-plan.md">implementation ledger</a>.<br>No ROS, GPU, network or archive required to read this page.</p>
+</aside>
+<main id="main">
+  <div class="callout warn"><strong>Historical system snapshot — September 22.</strong>Development now follows the <a href="implementation-plan-v2.md">September 26 local-terrain plan</a>: rover-centered short-motion assessment and coherent local reconstruction. Architecture/results below describe the retained baseline, not qualification of the new candidate. See the <a href="agent-runbook.md">maintained runbook</a> for current runners.</div>
+  <header class="hero">
+    <div class="eyebrow">Engineering field guide / repository snapshot</div>
+    <h1>From lunar LiDAR<br>to drivable terrain.</h1>
+    <p>How the simulator, GLIM, measurement-time pose association, terrain evidence and guarded tests fit together—and where the system is still experimental.</p>
+    <div class="pills"><span class="pill">10 cm XY cells</span><span class="pill">8 cm relative hazard height</span><span class="pill">30 Hz native input → 10 Hz map</span><span class="pill">Advisory, not navigation authority</span></div>
+    <p class="meta">Source-grounded • 2026-09-22 • Includes the corrected loop-driver rerun</p>
+  </header>
+
+  <section id="status">
+    <div class="eyebrow">01 / Start here</div><h2>What actually works today?</h2>
+    <p class="lead">We can build a geometric terrain map from actual simulator LiDAR chunks using causal, RTK-aided GLIM poses. The latest corner-following fix works. We have not yet completed the longer loop or qualified the new terrain map for autonomous navigation.</p>
+    <div class="grid three">
+      <article class="card"><span class="tag">Pose accuracy · failed-run prefix</span><div class="stat">6.32 <small>cm horizontal p95</small></div><p>First-published GLIM poses over <strong>74.97 s / 4.25 m</strong>. Height p95 <strong>5.58 mm</strong>; full 3D rotation p95 <strong>0.456°</strong>. One-time GT initialization and ongoing synthetic RTK aiding.</p></article>
+      <article class="card"><span class="tag warn">Terrain · development fixture</span><div class="stat">94.26<small>% flat coverage</small></div><p>Resolved-boundary candidate, including bounded inference; measured-only <strong>94.18%</strong>. <strong>12/12 positive objects</strong> detected, zero tested sequence false-free hazards. Not a natural-scene or live-loop coverage result.</p></article>
+      <article class="card"><span class="tag bad">Runtime · still blocking</span><div class="stat">106.25 <small>ms cycle p95</small></div><p>Latest live mapper cycle exceeds the <strong>50 ms p95 / 100 ms p99</strong> gates. The loop stopped on a simulator heartbeat expiry; the nominal <strong>16 m loop is incomplete</strong>.</p></article>
+    </div>
+    <div class="callout warn"><strong>Two different “maps” exist. Do not mix their readiness claims.</strong>The experimental <code>/terrain_shadow/costmap</code> is advisory-only. Existing Phase 3 Nav2 still reads the older <code>/astrobot_0/slam/bev_costmap</code>. Launching Phase 3 does not test the new terrain algorithm.</div>
+    <div class="linkrow"><a href="#testing">How to inspect or run tests →</a><a href="#frames">Understand the frame contract →</a><a href="terrain-algorithm-overview.html">Historical interactive terrain fixture →</a></div>
+  </section>
+
+  <section id="architecture">
+    <div class="eyebrow">02 / Separate the responsibilities</div><h2>One simulator, three distinct data paths</h2>
+    <div class="lanes">
+      <article class="lane"><h3>A · Localization: estimate where the sensors were</h3><div class="flow">
+        <div class="node"><strong>OmniLRS / Isaac Sim</strong><p>Full ROS LiDAR scans, physics IMU, wheel odometry. Separate GT base pose and clock.</p></div><div class="arrow" aria-hidden="true">→</div>
+        <div class="node"><strong>Crop + supervised GLIM</strong><p>Self-return filtering for registration. CPU GICP / inertial fixed-lag estimation with lunar gravity, GT start and accepted synthetic RTK constraints.</p></div><div class="arrow" aria-hidden="true">→</div>
+        <div class="node active"><strong>Timestamped poses + revisions</strong><p>IMU pose, LiDAR extrinsic, frame IDs, session/epoch and revision chain. First publication is distinct from final revised trajectory.</p></div>
+      </div></article>
+      <article class="lane"><h3>B · Experimental terrain: decide what has physical support</h3><div class="flow">
+        <div class="node"><strong>Raw native LiDAR chunks</strong><p>Rigid acquisition batches, archived before transport. No GT terrain labels. This bypasses the GLIM registration cloud.</p></div><div class="arrow" aria-hidden="true">＋</div>
+        <div class="node"><strong>Pose association + layered core</strong><p>Associate acquisition time to available GLIM poses; transform points and origin; accumulate bounded geometric evidence and classify the entire cell.</p></div><div class="arrow" aria-hidden="true">→</div>
+        <div class="node active"><strong>Advisory costmap + status</strong><p>20 × 20 m fixed grid, 10 cm cells, 10 Hz delayed evidence watermark. No command publisher or navigation authority.</p></div>
+      </div></article>
+      <article class="lane"><h3>C · Existing navigation: a different, older mapper</h3><div class="flow">
+        <div class="node legacy"><strong>Corrected aligned clouds</strong><p>Supervisor outputs feed the older probabilistic voxel / surface BEV pipeline.</p></div><div class="arrow" aria-hidden="true">→</div>
+        <div class="node legacy"><strong>BEV + map → odom bridge</strong><p>Phase 2 mapping and Phase 3 Nav2 costmaps. Unknown space remains blocked; inflation adds a soft obstacle gradient.</p></div><div class="arrow" aria-hidden="true">→</div>
+        <div class="node legacy"><strong>Nav2 + command mux</strong><p>Planner, controller and behavior tree. Not running beside the guarded shadow acquisition driver.</p></div>
+      </div></article>
+    </div>
+    <h3>GT has several explicitly different roles</h3>
+    <div class="table-wrap"><table><thead><tr><th>GT use</th><th>Allowed in the current experiment?</th><th>What it does not prove</th></tr></thead><tbody>
+      <tr><td>One-time estimator initialization</td><td>Yes: initialize the physical IMU pose from the known base pose and mount.</td><td>Not a demonstration of blind global localization.</td></tr>
+      <tr><td>Synthetic RTK aiding</td><td>Yes: GT-derived noisy position/heading observations through the accepted absolute-constraint path.</td><td>Not unaided SLAM drift performance or real GNSS availability.</td></tr>
+      <tr><td>Guarded acquisition driver</td><td>Yes: GT controls the declared route and verifies physical safety.</td><td>Not SLAM-driven navigation or obstacle avoidance.</td></tr>
+      <tr><td>Collision surface / obstacle labels</td><td>Evaluator and safety survey only. Never terrain-mapper classification input.</td><td>Coverage scores must not become candidate-dependent visibility masks.</td></tr>
+      <tr><td>GT-isolated terrain replay</td><td>Separate diagnostic: re-anchor both returns and origins with GT poses.</td><td>Isolates mapping; it cannot qualify live GLIM + terrain performance.</td></tr>
+    </tbody></table></div>
+    <p class="caption">Launch ownership: <a href="../../astrobot-lab/src/astrobot_launch/launch/terrain_shadow.launch.py">terrain_shadow.launch.py</a> → <a href="../../astrobot-lab/src/glim_slam_launch/launch/glim_live.launch.py">glim_live.launch.py</a> → <a href="../../astrobot-lab/src/localization_supervisor/localization_supervisor/node.py">localization supervisor</a>, which manages the GLIM process. The shadow launch starts synthetic RTK but no goal sender or Nav2.</p>
+    <details><summary>Where do exploration, return-home and operator control fit?</summary>
+      <p>The existing <a href="../../astrobot-lab/src/astrobot_launch/launch/phase4_exploration.launch.py">Phase 4 launch</a> adds the <a href="../../astrobot-lab/src/exploration_manager/exploration_manager/exploration_manager_node.py">exploration manager</a> above navigation. It selects exploration/resource candidates, prechecks planner reachability, tracks goal progress and blacklists failures. Return-home can use recorded breadcrumbs and bounded waypoint goals. These mission policies depend on the older BEV path; they are not exercised by the current GT-controlled loop.</p>
+      <p>The <a href="../../astrobot-lab/src/basic_control/basic_control/command_mux.py">command mux</a> arbitrates namespaced <code>cmd_vel_nav</code> and <code>cmd_vel_teleop</code> into <code>cmd_vel</code>, honoring <code>control/estop</code>, <code>control/mode</code>, freshness and configured localization gating. In automatic arbitration, fresh teleop takes priority; explicit nav/teleop modes select their source. Hold/stale inputs produce zero commands.</p>
+      <p>In shadow acquisition, the independently guarded simulator driver owns the velocity topic instead. <strong>Never launch both owners.</strong> Breadcrumb return, recovery jitter and exploration policy cannot compensate for an invalid surface map or an unsafe collision checker; they remain downstream integration work.</p>
+    </details>
+  </section>
+
+  <section id="topics">
+    <div class="eyebrow">03 / Wire-level reference</div><h2>ROS topics: who publishes what?</h2>
+    <p>Live stack: CycloneDDS, domain <strong>177</strong>. Isolated contract probes use domain <strong>179</strong>. Below, <code>/astrobot_0</code> is the default robot namespace; rates are configured/expected, not a promise of wall-clock throughput.</p>
+    <div class="searchbar"><label for="topic-search">Find a topic</label><input id="topic-search" type="search" placeholder="Try: IMU, native, revision, GT, costmap…" aria-controls="topic-table"><output id="topic-count" aria-live="polite"></output></div>
+    <div class="table-wrap"><table id="topic-table"><thead><tr><th>Topic / message</th><th>Producer → consumer</th><th>Frame / timing / role</th></tr></thead><tbody>
+      <tr><td><code>/clock</code><br><small>rosgraph_msgs/Clock</small></td><td>Simulator → all sim-time nodes and receipt scheduler</td><td>Simulation time. Scheduler bounds preceding received events by the next received clock. Separate wall watchdog detects stalls.</td></tr>
+      <tr><td><code>/astrobot_0/lidar_0/pointcloud/raw</code><br><small>sensor_msgs/PointCloud2</small></td><td>Simulator → crop filter / bag recorder</td><td>LiDAR-local full scans, nominal 10 Hz rotation. Full scans concatenate native chunks and are not motion-deskewed.</td></tr>
+      <tr><td><code>/astrobot_0/lidar_0/pointcloud/filtered</code><br><small>sensor_msgs/PointCloud2</small></td><td>Crop filter → GLIM</td><td>Sensor frame; robot-body returns cropped for registration. Not the raw terrain feed.</td></tr>
+      <tr><td><code>/astrobot_0/imu_physics</code><br><small>sensor_msgs/Imu</small></td><td>Physics-tick sensor → current frozen GLIM configuration</td><td>IMU frame, 60 Hz physics sampling. Sensor timestamps and clock metadata are audited.</td></tr>
+      <tr><td><code>/astrobot_0/imu</code><br><small>sensor_msgs/Imu</small></td><td>Legacy sensor publication → supervisor health path / recorder</td><td>Legacy 30 Hz stream. Do not confuse its health subscription with GLIM's selected physics IMU input.</td></tr>
+      <tr><td><code>/gt/base_link_pose</code><br><small>geometry_msgs/PoseStamped</small></td><td>Simulator → GT start, synthetic RTK, acquisition and evaluator</td><td>Physical base_link in simulator world (<code>gt_map</code>). Never compare directly with an IMU pose in <code>map</code>.</td></tr>
+      <tr><td><code>/rtk/pose</code><br><small>geometry_msgs/PoseWithCovarianceStamped</small></td><td>Synthetic RTK → localization supervisor</td><td>Declared antenna/mount geometry in map frame; noisy absolute observations derived from GT.</td></tr>
+      <tr><td><code>/astrobot_0/localization/absolute_pose</code><br><small>geometry_msgs/PoseWithCovarianceStamped</small></td><td>Supervisor → GLIM absolute-constraint adapter</td><td>Accepted measurement-time constraint, covariance and closed-window association. Not an arbitrary latest-pose snap.</td></tr>
+      <tr><td><code>/astrobot_0/slam_raw/revisions</code><br><small>astrobot_interfaces/SlamRevision</small></td><td>GLIM revision adapter → live terrain core / recorder</td><td>Stable frame IDs, measurement stamps, <code>map_from_imu</code>, <code>imu_from_lidar</code>. Reliable transient-local transport; live core still requires revision 1.</td></tr>
+      <tr><td><code>/astrobot_0/slam_raw/pose_corrected</code><br><code>/astrobot_0/slam_raw/lidar_pose_corrected</code><br><code>/astrobot_0/slam_raw/aligned_points_corrected</code></td><td>GLIM ROS adapter → supervisor / diagnostic recorders</td><td>PoseStamped / PoseStamped / PointCloud2, in map. The first pose is the IMU body, not base_link. Corrected does not mean final forever.</td></tr>
+      <tr><td><code>/astrobot_0/slam/pose_corrected</code><br><code>/astrobot_0/slam/lidar_pose_corrected</code><br><code>/astrobot_0/slam/aligned_points_corrected</code></td><td>Supervisor → legacy mapping / TF / diagnostics</td><td>Supervised corrected outputs. Experimental native terrain does not consume these clouds.</td></tr>
+      <tr><td><code>/astrobot_0/localization/status</code><br><small>astrobot_interfaces/LocalizationStatus</small></td><td>Supervisor → recorder / safety consumers</td><td>Shadow readiness reason <code>shadow_pose_ready_not_navigation</code> is explicitly not navigation authorization.</td></tr>
+      <tr><td><code>/terrain_shadow/native_chunks</code><br><small>sensor_msgs/PointCloud2</small></td><td>Native capture bridge → shadow mapper / bag recorder</td><td><code>vlp16</code>-local acquisition chunks, about 30 Hz. Custom 40-byte record carries XYZ, range, intensity, contiguous sequence and capture UUID.</td></tr>
+      <tr><td><code>/terrain_shadow/native_complete</code><br><small>std_msgs/String, JSON</small></td><td>Simulator capture → shadow mapper / collector</td><td>Completion/count contract. An absence of further points is not inferred completion.</td></tr>
+      <tr><td><code>/terrain_shadow/costmap</code><br><small>nav_msgs/OccupancyGrid</small></td><td>Shadow mapper → visualization / recorder, not Nav2</td><td><code>map</code>; 200 × 200, 0.1 m, fixed origin. 10 Hz, stamped at the delayed evidence watermark.</td></tr>
+      <tr><td><code>/terrain_shadow/status</code><br><small>std_msgs/String, JSON</small></td><td>Shadow mapper → collector / operator</td><td>Failure, counts, timing, evidence stamp, hashes and <code>navigation_authority:false</code>. Read this alongside the map.</td></tr>
+      <tr><td><code>/astrobot_0/odom</code><br><small>nav_msgs/Odometry</small></td><td>Wheel odometry → supervisor / legacy TF bridge</td><td><code>odom</code> to physical base; different from globally anchored map pose.</td></tr>
+      <tr><td><code>/astrobot_0/slam/bev_costmap</code><br><small>nav_msgs/OccupancyGrid</small></td><td>Older probabilistic voxel mapper → Phase 3 Nav2 static layers</td><td><code>map</code>. This is the currently configured navigation map, not the experimental terrain topic.</td></tr>
+      <tr><td><code>/tf</code> and <code>/tf_static</code><br><small>tf2_msgs/TFMessage</small></td><td>Robot/simulator and selected localization TF owner → TF consumers / audits</td><td>Shadow mapping uses explicit revision transforms, not latest TF. Avoid simultaneous GT and estimated map → odom publishers.</td></tr>
+    </tbody></table></div>
+    <p id="topic-empty" hidden>No matching topics. Try “pose”, “native” or “map”.</p>
+    <p class="caption">The collector additionally records command/grant/request and physics clock metadata. For the exact capture list and QoS overrides, read <a href="../../tools/run_shadow_capture.py">run_shadow_capture.py</a>. <code>SlamObservation</code> carries GLIM-preprocessed observations in the revision foundation, not the native raw transport used above.</p>
+  </section>
+
+  <section id="frames">
+    <div class="eyebrow">04 / The foundation</div><h2>Frames: never compare different physical centers</h2>
+    <p class="lead">A pose is only meaningful with its parent frame, physical body and acquisition time. GLIM estimates the IMU body; GT reports base_link; terrain points originate at the LiDAR. The mount is off-center and rotated.</p>
+    <div class="diagram">
+      <svg viewBox="0 0 920 295" role="img" aria-labelledby="frames-title frames-description">
+        <title id="frames-title">Measurement-time frame relationships</title><desc id="frames-description">World to map is the fixed home translation. Map to IMU is estimated by GLIM. IMU to LiDAR is an audited extrinsic. Base to IMU is the physical mount. These are mathematical relationships, not a claim about the live TF tree.</desc>
+        <defs><marker id="frame-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="#08796f"/></marker></defs>
+        <g fill="#eef5f4" stroke="#aac9c5"><rect x="20" y="45" width="160" height="70" rx="10"/><rect x="270" y="45" width="140" height="70" rx="10"/><rect x="505" y="45" width="150" height="70" rx="10"/><rect x="745" y="45" width="155" height="70" rx="10"/><rect x="505" y="205" width="150" height="65" rx="10"/></g>
+        <g font-family="system-ui,sans-serif" font-size="18" text-anchor="middle" fill="#172e3b"><text x="100" y="85">world / gt_map</text><text x="340" y="85">map</text><text x="580" y="85">IMU body</text><text x="822" y="85">vlp16</text><text x="580" y="244">base_link</text></g>
+        <g stroke="#08796f" stroke-width="2" marker-end="url(#frame-arrow)"><path d="M180 80H265"/><path d="M410 80H500"/><path d="M655 80H740"/><path d="M580 200V120"/></g>
+        <g font-family="system-ui,sans-serif" font-size="12" text-anchor="middle" fill="#536873"><text x="225" y="29">fixed home</text><text x="458" y="29">GLIM at time t</text><text x="700" y="29">audited mount</text><text x="725" y="171">base → IMU extrinsic</text><text x="725" y="190">translation + near-180° yaw</text><text x="217" y="164">GT gives world → base_link.</text><text x="217" y="187">Convert both world origin and body center.</text><text x="217" y="230">Diagram: transform relationships,</text><text x="217" y="250">not an assertion of a published TF tree.</text></g>
+      </svg>
+    </div>
+    <div class="grid">
+      <article class="card"><h3>Exact transform contract</h3><p>Let <code>T_A_B</code> transform coordinates from frame B into frame A. At measurement time <code>t</code>:</p>
+        <pre><code>T_map_lidar(t) = T_map_imu(t) · T_imu_lidar
+T_map_base(t)  = T_map_imu(t) · inverse(T_base_imu)
+T_map_base_GT  = T_map_world · T_world_base_GT
+
+point_map  = T_map_lidar(t) · point_lidar
+origin_map = T_map_lidar(t) · [0, 0, 0, 1]</code></pre>
+        <p>Interpolate the <strong>IMU pose</strong> (translation + quaternion SLERP), then apply the rigid extrinsic. Interpolating LiDAR positions directly across a turn would incorrectly smooth the rotating lever arm.</p>
+      </article>
+      <article class="card"><h3>Physical mount / world origin</h3><ul>
+        <li>Fixed home in world: <code>[-20, -20, 0]</code>. Map position is world position minus home: world <code>(20,18)</code> becomes map <code>(40,38)</code>.</li>
+        <li>LiDAR parent mount: base translation approximately <code>[0.40, 0, 0.25] m</code>. Current natural experiments use an opt-in <strong>+5° pitch</strong>.</li>
+        <li>IMU mount: approximately <code>[0.264, 0.01728, 0.26247] m</code>, near <strong>180° yaw</strong> relative to base.</li>
+        <li>Use the recorded/audited <code>imu_from_lidar</code> and USD/TF checks as authority, not these rounded numbers.</li>
+      </ul></article>
+    </div>
+    <h3>Frame checks that must remain true</h3>
+    <ol>
+      <li><strong>Same body:</strong> simulator physics root and USD base_link agree. Wheel centers are symmetric about base XY (x ±0.256 m, y ±0.2854 m). Center of mass and instantaneous skid-steer turning center are not interchangeable with that body frame.</li>
+      <li><strong>Same acquisition:</strong> published GT and native sensor geometry match the same physics snapshot. The allowed 2 ns difference addresses round-versus-truncate representation only; it does not allow missing-tick interpolation or time fitting.</li>
+      <li><strong>Same mount:</strong> published TF matches the actual pitched LiDAR parent geometry. A frozen mount-corrected GLIM config is used; default config is not automatically equivalent.</li>
+      <li><strong>Same global origin:</strong> the evaluator uses the declared home transform. It does not optimize a best-fit SE(3) or shift timestamps to make GLIM look accurate.</li>
+      <li><strong>Single TF authority:</strong> capture uses <code>OMNILRS_GT_TF_ENABLED=false</code>. GT topics remain available. The legacy map→odom bridge must use same-time corrected pose and odometry; no competing GT broadcaster.</li>
+    </ol>
+    <p class="caption">Audit sources: <a href="../../tools/measure_live_glim_accuracy.py">live GLIM accuracy</a>, <a href="../../tools/audit_shadow_inputs.py">shadow input/mount audit</a>, <a href="../../tools/audit_tf_fixture.py">TF fixture audit</a>, <a href="../../OmniLRS/src/environments_wrappers/ros2/terrain_gt_probe.py">simulator GT probe</a>, <a href="../../astrobot-lab/src/slam_mapping/src/slam_map_to_odom_tf_node.cpp">legacy TF bridge</a>.</p>
+  </section>
+
+  <section id="timing">
+    <div class="eyebrow">05 / Causality, not just coordinates</div><h2>Native timing, first publication and pose revisions</h2>
+    <div class="grid"><article class="card"><h3>What the scanner actually delivers</h3><p>The mechanical scan is built over time. Native batches are rigid simulator acquisition chunks at about <strong>30 Hz</strong>; the ROS full scan accumulates multiple chunks at nominal <strong>10 Hz</strong>. Full scans are currently un-deskewed.</p><p>Terrain uses native chunks to avoid pretending a moving full scan has one valid pose. GLIM still consumes the full-scan stream. Slow motion reduces that error; it does not remove the timing distinction.</p></article>
+      <article class="card"><h3>What GLIM currently optimizes</h3><p>The frozen experiment uses CPU GICP, physics IMU and <strong>1.62 m/s² lunar gravity</strong>, plus absolute aiding. Submap/global optimization is disabled in its config, even though the global-mapping module can be enabled.</p><p>Local fixed-lag <strong>ODOM revisions still occur</strong>. Disabling loop closure does not make all historical poses immutable.</p></article></div>
+    <div class="diagram">
+      <svg viewBox="0 0 920 235" role="img" aria-labelledby="timing-title timing-description">
+        <title id="timing-title">Acquisition, available pose, deadline and projection</title><desc id="timing-description">A native chunk at acquisition t waits for a causal first-published IMU pose bracket. Events are assigned conservative next-clock receipt bounds. The pose deadline is t plus 200 milliseconds. Projection runs on a 100 millisecond grid at a 200 millisecond delayed watermark; later revisions are diagnostic, not retroactive remapping.</desc>
+        <path d="M45 105H875" stroke="#8ba8b1" stroke-width="3"/>
+        <g stroke-width="3"><path d="M90 88V125M320 88V125" stroke="#08796f"/><path d="M580 88V125" stroke="#b7791d"/><path d="M830 88V125" stroke="#536873"/></g>
+        <g font-family="system-ui,sans-serif" text-anchor="middle"><g font-size="15" fill="#172e3b"><text x="90" y="52">Acquire chunk</text><text x="320" y="52">Pose bracket arrives</text><text x="580" y="52">Association deadline</text><text x="805" y="52">Later pose revision</text></g><g font-size="12" fill="#536873"><text x="90" y="75">stamp t</text><text x="320" y="75">first-publication history</text><text x="580" y="75">t + 200 ms</text><text x="805" y="75">diagnostic only</text><text x="320" y="156">Receipt is bounded by the next received /clock.</text><text x="505" y="192">Map stamp = floor((clock − 200 ms) / 100 ms) × 100 ms</text><text x="505" y="216">Schematic, not a measured latency trace. Map age is not its publication wall time.</text></g></g>
+      </svg>
+    </div>
+    <h3>The live contract</h3>
+    <ul>
+      <li><strong>No extrapolation:</strong> require a measurement-time pose bracket with at most 200 ms gap, available by the 200 ms association deadline.</li>
+      <li><strong>Conservative receipt:</strong> callbacks are logged in actual order, then assigned the next received clock as an availability bound. Wall receipt timestamps are also retained. Executor backlog means this is not exact sensor-to-wall latency.</li>
+      <li><strong>Monotonic evidence:</strong> project at a 200 ms delayed, 100 ms-quantized acquisition watermark. This prevents map expiry/projection from moving past data that are still legitimately waiting for poses.</li>
+      <li><strong>Bounded state:</strong> at most 128 queued chunks / 32 MiB; pose-history cap 2,048 frames. Capture UUID, contiguous sequence from zero, session, epoch and revision ancestry are checked.</li>
+      <li><strong>First publication only:</strong> later local corrections are recorded but do not retroactively move already-integrated terrain. Final-revised trajectory accuracy is a separate retrospective diagnostic.</li>
+      <li><strong>Fail closed:</strong> resets, unsupported non-ODOM revisions, missing/duplicate inputs, extrinsic changes, missed deadlines and stale clock/input invalidate the advisory map. Its wall heartbeat is independent of simulation time.</li>
+    </ul>
+    <div class="callout warn"><strong>Pose-graph scaffolding ≠ correction-aware live terrain.</strong><code>SlamRevision</code> carries ODOM=1, SUBMAP=2 and GLOBAL=3 updates, and retained-observation/snapshot foundations exist. This live first-publication mapper rejects non-ODOM updates rather than silently keeping old geometry. Before enabling graph optimization, implement and validate retained-evidence rebuild/reintegration. Evidence decay is not a pose-graph correction strategy.</div>
+    <div class="callout bad"><strong>Known shutdown gap, not hidden by “fail closed”.</strong>An earlier SIGINT interrupted a callback after integration but before projection, leaving <code>completed:false</code> alongside final <code>valid:true</code>. Diagnostics expose the unprojected tail and reject completion. Shutdown invalidation/flush handling still needs a fix before any downstream authority is granted.</div>
+    <p class="caption">Core implementation: <a href="../../tools/terrain_shadow_core.py">ShadowCore</a>, <a href="../../tools/terrain_shadow_runtime.py">ReceiptScheduler</a>, <a href="../../tools/live_terrain_shadow.py">ROS wrapper</a>; wire contracts: <a href="../../astrobot-lab/src/astrobot_interfaces/msg/SlamRevision.msg">SlamRevision</a> and <a href="../../astrobot-lab/src/astrobot_interfaces/msg/SlamFramePose.msg">SlamFramePose</a>.</p>
+  </section>
+
+  <section id="terrain">
+    <div class="eyebrow">06 / The mapper itself</div><h2>A supported surface, not “empty voxels = free”</h2>
+    <p class="lead">The experimental core stores compact geometric evidence in XY cells and continuous-height layers. It asks whether a local ground surface exists, whether it has hazards, and whether the whole output cell is sufficiently supported to be called drivable.</p>
+    <div class="steps">
+      <article class="step"><h3>Preserve useful returns; transform at acquisition time</h3><p>Native transport preserves finite XYZ returns. Input filtering removes invalid/range-boundary returns and enforces the declared 0.5–100 m radial range, not a ground-height or robot-footprint crop. Apply the same pose to points and LiDAR origin.</p></article>
+      <article class="step"><h3>Accumulate bounded, expiring geometric layers</h3><p>Each 10 cm XY cell keeps up to three normal height layers plus a conservative overflow layer that cannot define ground. A 2.5 cm association band groups heights; it is not 10 cm vertical voxel quantization. Counts, scatter, extrema, view/support and 5×5 within-cell XY-presence metadata summarize returns.</p></article>
+      <article class="step"><h3>Estimate local ground, then measure relative height</h3><p>A robust local plane uses the lowest plausible surface layers in a 9×9 neighborhood. Ground tolerance is 3 cm; uncertainty limit 2 cm; maximum slope 0.35 rise/run (about 19.3°). Evaluate residuals relative to that plane: a sloped surface is not automatically a vertical obstacle.</p></article>
+      <article class="step"><h3>Keep ground evidence separate from boundary evidence</h3><p>The two-path candidate also classifies native-chunk surface/boundary evidence before pooling. This helps distinguish consistent support from motion/registration scatter. Ground votes cannot erase independent step, wall or dropoff evidence. The resolved-boundary variant avoids a redundant supplemental unknown halo at an already occupied source; conservative boundary guards remain.</p></article>
+      <article class="step"><h3>Classify hazards and check connectivity</h3><p>Use relative 8 cm positive hazards, negative edges, surface extent and uncertainty. Steep/mixed or inadequately modelled regions remain unknown or occupied. Connect compatible supported surfaces; bounded interpolation spans at most 30 cm and must satisfy its geometric support checks.</p></article>
+      <article class="step"><h3>Require whole-cell support and clearance</h3><p>A return at the cell center is not enough. Corner/angular coverage and bounded span certificates prevent bridging unobserved hole rims. Clearance/occlusion checks reject apparent ground hidden by a face. Missing returns never establish free space.</p></article>
+      <article class="step"><h3>Project six outputs; publish one advisory cost grid</h3><p>The C API returns cost, reason, ground height, uncertainty, obstacle height and age. The ROS wrapper publishes the cost channel and archives hashes for all six. Evidence expires after 30 s in immutable ≤1 s buckets; fresh hits do not rejuvenate old extrema.</p></article>
+    </div>
+    <div class="grid" style="margin-top:20px"><article class="card"><h3>Three different length scales</h3><div class="table-wrap"><table><thead><tr><th>Quantity</th><th>Meaning</th></tr></thead><tbody><tr><td>10 cm XY</td><td>Output cell width; not robot footprint.</td></tr><tr><td>2.5 cm layer band</td><td>Continuous-height evidence association.</td></tr><tr><td>8 cm relative height</td><td>Hazard requirement relative to local ground.</td></tr></tbody></table></div><p>Footprint and obstacle inflation belong to the downstream planner/safety layer. They do not replace correct ground classification.</p></article>
+      <article class="card"><h3>Output interpretation</h3><div class="legend"><span><i class="dot" style="background:#86949e"></i>−1 unknown</span><span><i class="dot" style="background:#4ea88b"></i>0 free</span><span><i class="dot" style="background:#d8ab50"></i>20 cautious</span><span><i class="dot" style="background:#a63539"></i>100 occupied</span></div><p><code>20</code> includes inferred / low-relief cautious terrain. <code>100</code> is an OccupancyGrid value, not literal mathematical infinity. This core does not generate a continuous obstacle-distance inflation field.</p><p>The grid is a <strong>fixed 20 × 20 m window</strong>, origin frozen from the initial map-base position minus 10 m. It is not a rolling or unlimited global map; large-route coverage must account for boundaries and evidence lifetime.</p></article></div>
+    <details><summary>All 13 reason codes: why a cell is free, blocked or unknown</summary><div class="table-wrap"><table><thead><tr><th>Code</th><th>Name</th><th>Interpretation</th></tr></thead><tbody>
+      <tr><td>0</td><td>NO_RETURNS</td><td>No retained observations.</td></tr><tr><td>1</td><td>MEASURED_GROUND</td><td>Measured support passed classification.</td></tr><tr><td>2</td><td>INFERRED_GROUND</td><td>Bounded supported interpolation, not a synthetic return.</td></tr><tr><td>3</td><td>OBSTACLE</td><td>Positive occupied geometry.</td></tr><tr><td>4</td><td>NO_GROUND_MODEL</td><td>Cannot establish a reliable reference surface.</td></tr><tr><td>5</td><td>DISCONNECTED_SURFACE</td><td>Surface connectivity fails.</td></tr><tr><td>6</td><td>LAYER_CAPACITY</td><td>Overflow prevents a confident surface decision.</td></tr><tr><td>7</td><td>UNCERTAIN_RAISED</td><td>Raised evidence cannot safely be treated as ground.</td></tr><tr><td>8</td><td>NEGATIVE_EDGE</td><td>Dropoff / downward discontinuity.</td></tr><tr><td>9</td><td>INSUFFICIENT_AREA</td><td>Support coverage is inadequate.</td></tr><tr><td>10</td><td>CLEARANCE_OCCLUDED</td><td>Geometry prevents a clearance/support claim.</td></tr><tr><td>11</td><td>POSITIVE_EDGE</td><td>Upward boundary conservatism.</td></tr><tr><td>12</td><td>UNSUPPORTED_EXTENT</td><td>Whole-cell extent lacks a safe certificate.</td></tr>
+    </tbody></table></div></details>
+    <p class="caption">Read the <a href="../../astrobot-lab/src/slam_mapping/include/slam_mapping/layered_terrain.hpp">config / data structures</a>, <a href="../../astrobot-lab/src/slam_mapping/src/layered_terrain.cpp">integrate / project implementation</a>, <a href="../../astrobot-lab/src/slam_mapping/include/slam_mapping/angular_support.hpp">angular support certificate</a> and <a href="../../astrobot-lab/src/slam_mapping/include/slam_mapping/observation_moments.hpp">native observation moments</a>. The <a href="terrain-algorithm-overview.html">older interactive fixture</a> illustrates a rejected boundary shortcut; it is a September 14 snapshot, not this latest candidate's result.</p>
+    <div class="callout"><strong>Computational strategy</strong>Bounded cells, layers, evidence lifetime and queues keep work tractable. Independent classification/clearance uses at most four OpenMP workers. Exact output regression and both dense-flat and layered-capacity stress profiles are required after optimization. A resource pass in isolation is not a live ROS timing pass.</div>
+  </section>
+
+  <section id="motion">
+    <div class="eyebrow">07 / Controlled motion, not autonomous planning</div><h2>The loop driver—and the assumption we fixed</h2>
+    <div class="grid"><article class="card"><h3>Declared loop16 route</h3><pre><code>Initial planar-base coordinates, metres:
+(0,0) → (2,0) → (2,−6) → (0,−6) → (0,0)
+Four clockwise 90° turns; final original heading.
+Translation 0.10 m/s; rotation ≤0.10 rad/s.
+Nominal translation dose: 16 m.</code></pre><p>The acquisition driver uses GT and a surveyed clear corridor. The shadow mapper and collector do not publish velocity commands. No simultaneous Nav2, teleop or other command owner is allowed.</p></article><article class="card"><h3>Fixed post-turn connection, version 2</h3><p>Version 1 allowed up to 25 cm displacement during a turn, then required the next translation to already lie within 8 cm of the nominal straight line. A legal turn could therefore fail at the transition.</p><p><code>frozen_post_turn_connection_v2</code> freezes the actual first GT translation pose as the start, then steers toward the <strong>unchanged next waypoint</strong>. Cross-track error is measured against that immutable connection, not a continuously re-fitted path.</p></article></div>
+    <div class="diagram">
+      <svg viewBox="0 0 920 270" role="img" aria-labelledby="route-title route-description">
+        <title id="route-title">Loop route and corrected corner-to-straight connector</title><desc id="route-description">A 2 by 6 metre rectangular nominal loop. At the first corner, the actual post-turn start can be displaced. Version 2 freezes a connection from that actual start to the unchanged next waypoint, retaining cross-track and survey bounds. Diagram is schematic, not a measured trajectory.</desc>
+        <path d="M105 48H275V218H105Z" fill="#edf6f2" stroke="#91abae" stroke-width="3" stroke-dasharray="7 5"/><path d="M105 48H275" stroke="#08796f" stroke-width="5"/>
+        <g fill="#08796f"><circle cx="105" cy="48" r="6"/><circle cx="275" cy="48" r="6"/><circle cx="275" cy="218" r="6"/><circle cx="105" cy="218" r="6"/></g>
+        <g font-family="system-ui,sans-serif" font-size="12" fill="#536873"><text x="60" y="30">start (0,0)</text><text x="255" y="30">(2,0)</text><text x="280" y="236">(2,−6)</text><text x="48" y="236">(0,−6)</text><text x="177" y="37">2 m</text><text x="287" y="138">6 m</text><text x="65" y="265">Nominal route, not a recorded trace.</text></g>
+        <path d="M590 45V225" stroke="#91abae" stroke-width="2" stroke-dasharray="6 5"/><path d="M527 74L590 225" stroke="#08796f" stroke-width="4"/>
+        <circle cx="590" cy="45" r="6" fill="#536873"/><circle cx="527" cy="74" r="7" fill="#b7791d"/><circle cx="590" cy="225" r="7" fill="#08796f"/>
+        <g font-family="system-ui,sans-serif" font-size="13" fill="#172e3b"><text x="615" y="49">Nominal corner</text><text x="615" y="87">Actual post-turn start (frozen)</text><text x="615" y="139">New bounded connection</text><text x="615" y="165">Same 8 cm cross-track guard</text><text x="615" y="230">Unchanged destination</text></g><path d="M536 74H604" stroke="#b7791d"/>
+      </svg>
+    </div>
+    <h3>Guards retained, not loosened to make a test pass</h3>
+    <ul><li><strong>Independent preflight:</strong> 17,072 physical survey samples at 5 cm spacing over the inflated route region; floor support and relative roughness/slope checks.</li>
+      <li><strong>Physical envelope:</strong> acquisition footprint half-extents 0.85 × 0.70 m, turn-center offset ≤25 cm, straight cross-track ≤8 cm, heading error ≤0.15 rad. The connector cannot extend beyond the originally surveyed center envelope.</li>
+      <li><strong>Time and authority:</strong> 0.5 s wall heartbeat, 1.5 s stall limit, bounded leg deadlines, 1,800 s experiment wall cap, sole publisher, recorder readiness lease and stop/revoke on failure.</li>
+      <li><strong>Auditability:</strong> changed route version/hash, first-pose anchors retained in every command/reached row, immutable-anchor and endpoint audit. Failed v1 recordings stay failed.</li></ul>
+    <div class="callout"><strong>Latest rerun: the transition fix worked; a different failure stopped the experiment.</strong>First 2 m leg and 90° turn completed; the next connection advanced 1.991 m with maximum 1.98 mm cross-track error. The later stop was a simulation heartbeat expiry, not the previous nominal-line rejection. Actual total GT travel was 4.25 m, not a completed 16 m loop.</div>
+    <p class="caption">Route mathematics / contracts: <a href="../../tools/natural_motion.py">natural_motion.py</a>. Actual simulator command publisher: <a href="../../OmniLRS/src/environments_wrappers/ros2/natural_motion_drive.py">natural_motion_drive.py</a>. Acquisition coordination: <a href="../../OmniLRS/src/environments_wrappers/ros2/natural_holdout_capture.py">natural_holdout_capture.py</a>.</p>
+  </section>
+
+  <section id="evidence">
+    <div class="eyebrow">08 / What the measurements do—and do not—say</div><h2>Evidence ledger in one screen</h2>
+    <div class="table-wrap"><table><thead><tr><th>Experiment / scope</th><th>Result</th><th>Interpretation</th></tr></thead><tbody>
+      <tr><td>Latest loop v2 prefix<br>Sep 22 · GT-start, RTK-aided</td><td>74.97 s; 4.25 m actual travel; 2,250 native chunks; 748 map projections. 2,243 integrated pose associations verified. First-published p95: 6.32 cm horizontal / 5.58 mm z / 0.456° rotation.</td><td><span class="tag bad">Run failed</span> Driver transition fixed. Heartbeat stop prevents loop acceptance. Three terminal native poses lack GLIM brackets and remain unscored.</td></tr>
+      <tr><td>Same prefix, final revised poses</td><td>Retrospective p95: 6.84 cm horizontal / 3.96 mm z / 0.355° rotation.</td><td>Not the poses used online. Refinement is not guaranteed to improve every metric.</td></tr>
+      <tr><td>Straight-slow original / repeat</td><td>First-published horizontal p95 6.66 / 7.13 cm; about 3.95 / 3.85 m actual travel.</td><td><span class="tag bad">Both failed heartbeat</span> Supports similar short-prefix accuracy, not endurance or broad-scene robustness.</td></tr>
+      <tr><td>Earlier loop v1 prefix</td><td>57.50 s / 2.25 m. Horizontal p95 6.08 cm; z 8.53 mm; rotation 0.470°.</td><td>Failed at legal-turn → nominal-line transition. No catastrophic GLIM divergence observed through that first turn.</td></tr>
+      <tr><td>Resolved-boundary analytic development fixture</td><td>94.183% measured / 94.256% including inferred flat coverage; 12/12 objects; zero tested sequence positive/dropoff false-free.</td><td>Below 95% target. Not a universal recall claim or live natural-scene score; four grid phases and safety denominators remain relevant.</td></tr>
+      <tr><td>GT vs revised-pose terrain comparison</td><td>Three occupied-GT → SLAM-free conflicts remained; lateral pose offsets roughly 1.94–5.77 cm.</td><td>Centimetre-scale pose error can matter at cell/obstacle boundaries. Not explained away as a world-origin mismatch.</td></tr>
+      <tr><td>Isolated resource stress</td><td>Layered capacity: 1,013.15 MiB RSS, 48.85 / 54.29 ms p95/p99. Dense flat: 330.07 MiB, 47.70 / 51.99 ms.</td><td>These isolated profiles passed their gates, with little capacity memory margin. No inference of live integration throughput.</td></tr>
+      <tr><td>Latest live mapper cycles</td><td>80.47 / 106.25 / 109.78 ms median/p95/p99.</td><td><span class="tag bad">Compute gate failed</span> Required p95 ≤50 ms, p99 ≤100 ms; evaluate in the actual shared simulator/ROS workload.</td></tr>
+      <tr><td>Installed Nav2 primitive wall probe</td><td>3 of 1,932 tested padded footprints accepted wall intersections; 2 also intersected the unpadded footprint.</td><td><span class="tag bad">Safety gate failed</span> A center/perimeter collision check plus inflation is not proof of full-area or swept-motion safety. Offline veto work is not yet an installed integration pass.</td></tr>
+    </tbody></table></div>
+    <details><summary>Exact latest provenance and frozen binaries</summary>
+      <p>Paths below are inside the archive-enabled dev container. IDs are immutable run directories, not Git revisions. They refer to preserved failed captures and diagnostic results.</p>
+      <pre><code>Simulator: /archive/revision-379884211d744a1790860f9969775530
+Recorder:  /archive/revision-38b96ba8739f4cfeb84da7d1200f9ec1
+Mapper:    /archive/revision-f0db6c401ce845b7800297622753d1d6
+Accuracy:  /archive/revision-76d17e74292e428dac1ac36daa1a5549
+
+Frozen GLIM config:
+/archive/revision-009c6a6d47ab4b85b81bb6cc7aabcf44/config
+
+Frozen terrain candidate:
+/archive/revision-ecd489e9a270438eaf5bc646e8ed6010/libresolved_boundary.so
+SHA256:
+d7f4170d49e32ecd5987fc95540badbb051e035eb62436bc8ad988b7d1929611</code></pre>
+      <p>The frozen GLIM experiment includes <code>librevision_target_cpu.so</code> and <code>libclosed_window_abs.so</code>. Rebuilding the default mapper or using the repository's default GLIM config is a new configuration, not automatically reproduction of these measurements.</p>
+    </details>
+    <h3>Guardrails against accidental “cheating”</h3>
+    <div class="grid"><article class="card"><h3>Freeze the inputs and denominator</h3><p>Retain raw recordings, reference hashes, mount/config/library hashes, route version, seed, acquisition dose and grid phase. Compare all frames, including the worst positive/dropoff false-free result—not just the final pretty map. Unknown and outside-grid reference cells remain in the declared coverage denominator.</p><p>GT labels stay in evaluators. Do not substitute longer evidence lifetime, more motion, fitted pose alignment or a visibility mask without declaring a different experiment.</p></article><article class="card"><h3>Preserve failures and causal limits</h3><p>Exclusive-create archives; no overwriting failed attempts. Missing scans, missing pose brackets and reset epochs cannot be interpolated away. First-published and final-revised scores are separate. A failed-prefix diagnostic always retains <code>acceptance:false</code>.</p><p>Development grid phases are not new held-out scenes. Unit tests, isolated compute tests and a requested repeat do not replace a completed, independently scored live mission.</p></article></div>
+    <p class="caption">Full numerical history, counterexamples and retained failures: <a href="implementation-plan.md">implementation-plan.md</a>. The numbers here are a dated snapshot, not a live dashboard.</p>
+  </section>
+
+  <section id="code">
+    <div class="eyebrow">09 / Reading map</div><h2>Where the critical code lives</h2>
+    <p>Start with the launch, follow one native chunk through the scheduler into <code>LayeredTerrain::integrate</code> / <code>project</code>, then read the evaluator independently. Links are repository-relative; serve the repository root for browser access to source files.</p>
+    <div class="table-wrap"><table class="source-list"><thead><tr><th>Responsibility</th><th>Critical files</th><th>What to look for</th></tr></thead><tbody>
+      <tr><td>Entry points / ownership</td><td><a href="../../astrobot-lab/src/astrobot_launch/launch/terrain_shadow.launch.py">terrain_shadow.launch.py</a><br><a href="../../astrobot-lab/src/glim_slam_launch/launch/glim_live.launch.py">glim_live.launch.py</a><br><a href="../../tools/run_shadow_capture.py">run_shadow_capture.py</a></td><td>Opt-in flags; frozen configuration; no Nav2; recorder-first readiness leases; shutdown and count gates.</td></tr>
+      <tr><td>Simulator sensing / safety</td><td><a href="../../OmniLRS/src/environments_wrappers/ros2/terrain_native_capture.py">terrain_native_capture.py</a><br><a href="../../OmniLRS/src/environments_wrappers/ros2/natural_holdout_capture.py">natural_holdout_capture.py</a><br><a href="../../OmniLRS/src/environments_wrappers/ros2/natural_motion_drive.py">natural_motion_drive.py</a><br><a href="../../OmniLRS/src/environments_wrappers/ros2/gt_map_ros2.py">gt_map_ros2.py</a></td><td>Raw archive-before-publish; native stamps; physical GT checks; watchdog and sole command owner; optional GT TF.</td></tr>
+      <tr><td>Localization state machine</td><td><a href="../../astrobot-lab/src/localization_supervisor/localization_supervisor/node.py">localization supervisor node.py</a><br><a href="../../tools/glim_gt_start.py">glim_gt_start.py</a><br><a href="../../astrobot-lab/src/glim_slam_launch/config/glim_astrobot/README.md">GLIM configuration notes</a></td><td>GLIM lifecycle; accepted absolute priors; corrected output gating; shadow readiness distinct from navigation; mount-aware initialization.</td></tr>
+      <tr><td>GLIM adapters / revision wire format</td><td><a href="../../astrobot-lab/src/glim_ros2/src/glim_ros/revision_module.cpp">revision_module.cpp</a><br><a href="../../astrobot-lab/src/glim_ros2/src/glim_ros/abs_constraint_module.cpp">abs_constraint_module.cpp</a><br><a href="../../astrobot-lab/src/glim_ros2/include/glim_ros/absolute_association.hpp">absolute_association.hpp</a><br><a href="../../astrobot-lab/src/astrobot_interfaces/msg/SlamFramePose.msg">SlamFramePose.msg</a></td><td>Measurement-time frame IDs, IMU/LiDAR extrinsics, revision lineage and closed-window prior association—not latest-TF guesses.</td></tr>
+      <tr><td>Native transport / validity</td><td><a href="../../tools/native_chunk_transport.py">native_chunk_transport.py</a><br><a href="../../tools/raw_return_filter.py">raw_return_filter.py</a></td><td>40-byte layout, capture/sequence checks, sensor-local returns, radial filtering without terrain labels.</td></tr>
+      <tr><td>Causal terrain scheduler</td><td><a href="../../tools/terrain_shadow_runtime.py">terrain_shadow_runtime.py</a><br><a href="../../tools/terrain_shadow_core.py">terrain_shadow_core.py</a><br><a href="../../tools/shadow_terrain.py">shadow_terrain.py</a><br><a href="../../tools/live_terrain_shadow.py">live_terrain_shadow.py</a></td><td><code>ReceiptScheduler</code>, <code>ShadowCore.revision/chunk/advance/fault</code>, first-publication pose association, delayed projection and live status.</td></tr>
+      <tr><td>Geometric terrain core</td><td><a href="../../astrobot-lab/src/slam_mapping/include/slam_mapping/layered_terrain.hpp">layered_terrain.hpp</a><br><a href="../../astrobot-lab/src/slam_mapping/src/layered_terrain.cpp">layered_terrain.cpp</a><br><a href="../../astrobot-lab/src/slam_mapping/include/slam_mapping/angular_support.hpp">angular_support.hpp</a><br><a href="../../astrobot-lab/src/slam_mapping/include/slam_mapping/observation_moments.hpp">observation_moments.hpp</a></td><td>Layered statistics, immutable expiry, local plane fit, native boundaries, support certificates, clearance. Most classification changes belong here.</td></tr>
+      <tr><td>Bindings / build variants</td><td><a href="../../astrobot-lab/src/slam_mapping/src/layered_terrain_c.cpp">layered_terrain_c.cpp</a><br><a href="../../tools/layered_terrain.py">layered_terrain.py</a><br><a href="../../astrobot-lab/src/slam_mapping/CMakeLists.txt">slam_mapping/CMakeLists.txt</a></td><td>Six interleaved output channels. Default vs observations/two-path/resolved-boundary variants. Compile-time layout macros must match tests.</td></tr>
+      <tr><td>Route contracts</td><td><a href="../../tools/natural_motion.py">natural_motion.py</a><br><a href="../../tools/test/test_natural_motion.py">test_natural_motion.py</a><br><a href="../../tools/test/test_natural_loop.py">test_natural_loop.py</a></td><td>Versioned route/hash, immutable corner anchors, endpoint steering, survey envelope and exact failure regression.</td></tr>
+      <tr><td>Independent audits / accuracy</td><td><a href="../../tools/audit_native_terrain.py">audit_native_terrain.py</a><br><a href="../../tools/audit_shadow_inputs.py">audit_shadow_inputs.py</a><br><a href="../../tools/measure_live_glim_accuracy.py">measure_live_glim_accuracy.py</a><br><a href="../../tools/replay_live_terrain_shadow.py">replay_live_terrain_shadow.py</a></td><td>GT/native/TF agreement; causal vs revised accuracy; all live associations; exact callback replay; explicit failed-prefix limitations.</td></tr>
+      <tr><td>Terrain scoring / compute</td><td><a href="../../tools/replay_native_terrain.py">replay_native_terrain.py</a><br><a href="../../tools/score_terrain_calibration.py">score_terrain_calibration.py</a><br><a href="../../tools/compare_terrain_replays.py">compare_terrain_replays.py</a><br><a href="../../tools/stress_terrain_resources.py">stress_terrain_resources.py</a></td><td>Fixed reference, whole sequence, grid phases, exact replay and two adversarial resource profiles.</td></tr>
+      <tr><td>Legacy navigation / pending integration</td><td><a href="../../astrobot-lab/src/astrobot_launch/launch/phase3_nav.launch.py">phase3_nav.launch.py</a><br><a href="../../astrobot-lab/src/astrobot_launch/config/nav2_phase3_bev.yaml">nav2_phase3_bev.yaml</a><br><a href="../../astrobot-lab/src/basic_control/basic_control/command_mux.py">command_mux.py</a><br><a href="../../tools/run_nav2_shadow_check.py">run_nav2_shadow_check.py</a></td><td>BEV topic is still older mapper; unknown policy, footprint/inflation, command ownership, collision primitive failures.</td></tr>
+    </tbody></table></div>
+  </section>
+
+  <section id="testing">
+    <div class="eyebrow">10 / Runnable, with scope labels</div><h2>How to inspect, test and reproduce</h2>
+    <p class="lead">Start offline. Move to the sourced ROS environment for serialization and live-node tests. Only the explicitly marked capture recipe below starts physical simulator motion.</p>
+    <div class="callout warn"><strong>Archive and environment rules</strong>Heavy capture/replay/stress outputs belong on the external drive, exposed as <code>/archive</code> using <code>docker-compose.archive.yml</code>. A disconnected drive is a hard stop, never permission to fall back onto the root filesystem. Verify mounts after reconnecting; recreate stale container binds. Inside dev, source <code>/etc/ros_setup.sh</code>, not a mixture of independent ROS prefixes.</div>
+
+    <h3>A · Read the guide and the interactive algorithm fixture <span class="tag">No motion · no ROS</span></h3>
+    <p>Open this file directly, or serve the repository so all source links work. The earlier walkthrough includes a recorded fixture and interactive cell inspection, not a live simulator demo.</p>
+    <div class="command"><button class="copy" type="button" aria-label="Copy local documentation server command">Copy</button><pre><code>cd /home/jacoblambert/astrobot-lab
+python3 -m http.server 8088 --bind 127.0.0.1
+# Open: http://127.0.0.1:8088/docs/implementation/system-overview.html
+# Fixture: http://127.0.0.1:8088/docs/implementation/terrain-algorithm-overview.html
+# Remote host: forward port 8088 over SSH; do not expose the repo publicly.</code></pre></div>
+
+    <h3>B · Host contracts: route, pose evaluator and documentation <span class="tag">No motion · no GPU</span></h3>
+    <p>Run from repository root with Python, NumPy, SciPy and pytest available. The route/accuracy group had 98 passing contracts at the last implementation checkpoint; test counts are not mission acceptance.</p>
+    <div class="command"><button class="copy" type="button" aria-label="Copy host contract commands">Copy</button><pre><code>PYTHONPATH=astrobot-lab/src/astrobot_core python3 -m pytest -p no:cacheprovider \
+  tools/test/test_natural_motion.py tools/test/test_natural_loop.py \
+  tools/test/test_live_glim_accuracy.py tools/test/test_glim_accuracy.py
+
+python3 -m pytest -p no:cacheprovider \
+  tools/test/test_system_overview.py tools/test/test_terrain_algorithm_overview.py</code></pre></div>
+    <p class="caption">Other focused groups: <a href="../../tools/test/test_shadow_terrain.py">pose/terrain contracts</a>, <a href="../../tools/test/test_shadow_inputs.py">mount/timing contracts</a>, <a href="../../tools/test/test_live_terrain_shadow.py">live core contracts</a>, <a href="../../tools/test/test_archive_guard.py">archive guard</a>, <a href="../../tools/test/test_cuda_runtime.py">mocked CUDA probe</a>. See <a href="../../AGENTS.md">AGENTS.md</a> for exact dependencies/runners.</p>
+
+    <h3>C · Build and test the candidate in ROS <span class="tag neutral">Build · no motion</span></h3>
+    <p>Inside the dev container, use the ROS workspace. These flags install the opt-in shadow tools and enable the two-path candidate contracts. A source rebuild produces a new binary; freeze/hash it before comparisons. It does not replace the retained frozen library.</p>
+    <div class="command"><button class="copy" type="button" aria-label="Copy ROS build and test commands">Copy</button><pre><code>source /etc/ros_setup.sh
+cd /workspace/astrobot-lab/astrobot-lab
+colcon build --symlink-install --cmake-args \
+  -DBUILD_TESTING=ON \
+  -DSLAM_MAPPING_BUILD_TERRAIN_SHADOW=ON \
+  -DSLAM_MAPPING_TEST_TWO_PATH=ON
+source install/setup.bash
+colcon test --packages-select slam_mapping glim_ros
+colcon test-result --verbose</code></pre></div>
+    <p>Run the live-node serialization/callback tests only after building the interfaces and shadow installation. Domain 179 isolates them from the live domain; the fixture supplies inputs and sends no robot commands.</p>
+    <div class="command"><button class="copy" type="button" aria-label="Copy ROS live-node contract command">Copy</button><pre><code>cd /workspace/astrobot-lab
+ROS_DOMAIN_ID=179 ROS_LOCALHOST_ONLY=1 OMP_NUM_THREADS=1 \
+TERRAIN_SHADOW_ROS_TEST=1 \
+TERRAIN_LIBRARY=/archive/revision-ecd489e9a270438eaf5bc646e8ed6010/libresolved_boundary.so \
+python3 -m pytest -p no:cacheprovider tools/test/test_live_terrain_shadow_ros.py</code></pre></div>
+
+    <h3>D · Recompute latest GLIM accuracy <span class="tag">No motion · archive + ROS required</span></h3>
+    <p>In the sourced dev environment, this allocates a <em>new</em> diagnostic result and retains all source failures. It checks fixed-frame GT/native geometry and actual live pose associations; it reports first-published and revised trajectories separately.</p>
+    <div class="command"><button class="copy" type="button" aria-label="Copy latest accuracy diagnostic command">Copy</button><pre><code>cd /workspace/astrobot-lab
+python3 tools/measure_live_glim_accuracy.py \
+  /archive/revision-379884211d744a1790860f9969775530 \
+  /archive/revision-38b96ba8739f4cfeb84da7d1200f9ec1 \
+  /archive/revision-f0db6c401ce845b7800297622753d1d6</code></pre></div>
+    <p>Expected artifact family: <code>accuracy_report.json</code>, <code>poses.jsonl</code>, <code>accuracy_arrays.npz</code>, <code>accuracy.png</code>. This is failed-prefix diagnosis with <code>acceptance:false</code>, not a completed-loop gate.</p>
+
+    <h3>E · Replay actual callback order <span class="tag">No motion · archive required</span></h3>
+    <p>The live replay reconstructs recorded availability and compares projected outputs. A completed run uses the normal path. The latest heartbeat-failed run requires the explicitly diagnostic prefix mode; it cannot establish source completion or live wall latency.</p>
+    <div class="command"><button class="copy" type="button" aria-label="Copy diagnostic prefix replay command">Copy</button><pre><code>python3 tools/replay_live_terrain_shadow.py \
+  /archive/revision-f0db6c401ce845b7800297622753d1d6 \
+  --diagnose-heartbeat-prefix</code></pre></div>
+    <details><summary>Additional offline terrain validation: which tool answers which question?</summary><ul>
+      <li><a href="../../tools/audit_native_terrain.py">audit_native_terrain.py</a>: is a <em>completed</em> capture's raw/native timing and physical sensor geometry valid? Failed captures remain ineligible.</li>
+      <li><a href="../../tools/replay_native_terrain.py">replay_native_terrain.py</a>: integrate every GT-isolated native input; evaluate at 10 Hz against the fixed reference. Repeat declared grid phases 0 / 0.025 / 0.05 / 0.075 m with one frozen core.</li>
+      <li><a href="../../tools/compare_terrain_replays.py">compare_terrain_replays.py</a>: exact per-frame/final output regression for identical input/reference/grid provenance; not “the aggregate score looks similar”.</li>
+      <li><a href="../../tools/stress_terrain_resources.py">stress_terrain_resources.py</a>: both the default capacity profile and <code>--profile dense_flat</code>. Independent ≤1 GiB RSS, ≤50 ms p95, ≤100 ms p99 gates. Use a frozen library and external archive; retain contention/failure results.</li>
+      <li><a href="../../tools/run_nav2_shadow_check.py">run_nav2_shadow_check.py</a>: installed primitive collision behavior. Its retained wall cases fail; expected failures are not safety acceptance.</li>
+    </ul><p>Exact environments, build flags and current qualifications are documented in <a href="../../AGENTS.md">AGENTS.md</a> and the <a href="implementation-plan.md">ledger</a>.</p></details>
+
+    <h3>F · Inspect a running shadow experiment <span class="tag">Read-only ROS commands</span></h3>
+    <p>Use the same sourced environment and domain as the live stack. The commands below do not start a stack or issue velocity commands.</p>
+    <div class="command"><button class="copy" type="button" aria-label="Copy read-only topic inspection commands">Copy</button><pre><code>export ROS_DOMAIN_ID=177
+ros2 topic echo /terrain_shadow/status --once
+ros2 topic info /terrain_shadow/native_chunks --verbose
+ros2 topic info /astrobot_0/slam_raw/revisions --verbose
+ros2 topic info /terrain_shadow/costmap --verbose</code></pre></div>
+    <p>In RViz, use fixed frame <code>map</code> and add the <code>/terrain_shadow/costmap</code> Map display. Add corrected LiDAR poses/clouds for registration context, but remember those clouds are not the terrain input. Display status and age alongside the grid; do not infer validity from an old visible map. Foxglove can also inspect these topics if its separately started bridge is available (usual local port 8765).</p>
+
+    <h3>G · Bounded live loop reproduction <span class="tag bad">MOVES ROBOT IN SIMULATION</span></h3>
+    <div class="callout bad"><strong>Advanced reproduction recipe, not a passing demo.</strong>The latest identical workload still stops on heartbeat/runtime failures. Do not run this merely to view the documentation. No Nav2, teleop, other command publisher or second capture may run alongside it. Keep the existing watchdogs. A working GPU and external archive are mandatory.</div>
+    <details><summary>Preflight, frozen environment and two-terminal launch recipe</summary>
+      <p><strong>Host preflight:</strong> check both NVML and actual CUDA allocation. A driver/kernel mismatch or CUDA error 999 needs host repair; do not reset hardware or repeatedly launch captures implicitly.</p>
+      <div class="command"><button class="copy" type="button" aria-label="Copy host preflight checks">Copy</button><pre><code>cd /home/jacoblambert/astrobot-lab
+nvidia-smi
+python3 docker/check_cuda_runtime.py
+findmnt -T /media/jacoblambert/6c8aadd0-9332-4357-aea4-437b6aadef261/astrobot-lab
+docker ps --format 'table {{.Names}}\t{{.Status}}'</code></pre></div>
+      <p>Verify the reported filesystem really is the external drive, and verify <code>/archive</code> in the dev container. The current experimental dev container is <code>astrobot-shadow-gpu-dev</code>; names and temporary overlay directories are environment-specific. Prefer the host UID/GID for user-owned archives.</p>
+      <p><strong>Terminal 1: collector in the dev container.</strong> This known frozen environment must already exist. Missing prefixes are a setup blocker, not permission to silently substitute the default config. The collector records before granting driver motion; it is not itself a velocity publisher.</p>
+      <div class="command"><button class="copy" type="button" aria-label="Copy dev container entry command">Copy</button><pre><code># Run on the host to enter the dev container:
+docker exec -it --user "$(id -u):$(id -g)" astrobot-shadow-gpu-dev bash</code></pre></div>
+      <div class="command"><button class="copy" type="button" aria-label="Copy frozen collector environment and launch">Copy</button><pre><code># Inside the dev container, verify all of these paths first:
+source /etc/ros_setup.sh
+source /tmp/repair-install/setup.bash
+source /tmp/shadow-install/setup.bash
+export AMENT_PREFIX_PATH=/archive/revision-b178b18ddea54befa50bf8e8164ccd25/install:$AMENT_PREFIX_PATH
+source /archive/revision-9fb0c283273047b99be061705a90fcd6/launch-install/local_setup.bash
+cd /workspace/astrobot-lab
+export ROS_DOMAIN_ID=177
+OMP_NUM_THREADS=4 python3 tools/run_shadow_capture.py \
+  --config /archive/revision-009c6a6d47ab4b85b81bb6cc7aabcf44/config \
+  --require-physics-imu --natural-motion loop16 \
+  --terrain-library /archive/revision-ecd489e9a270438eaf5bc646e8ed6010/libresolved_boundary.so \
+  --wall-seconds 1800</code></pre></div>
+      <p>The standalone CMake shadow installation has no root <code>setup.bash</code>; its prefix is added to <code>AMENT_PREFIX_PATH</code>. The separate launch overlay does have <code>local_setup.bash</code>. See the ledger before rebuilding either.</p>
+      <p><strong>Terminal 2: start only the opt-in simulator capture.</strong> This performs the independent survey and then moves once the recorder/sensor/pose/mapper grants are ready. Do not launch any Phase 3/4 navigation stack.</p>
+      <div class="command"><button class="copy" type="button" aria-label="Copy guarded simulator loop launch">Copy</button><pre><code>cd /home/jacoblambert/astrobot-lab
+OMNILRS_ENVIRONMENT_SEED=43 OMNILRS_ROCKS_ENABLED=true \
+OMNILRS_GT_TF_ENABLED=false OMNILRS_CAMERA_ENABLED=false \
+OMNILRS_RESOURCE_ENABLED=false OMNILRS_PHYSICS_IMU=true \
+OMNILRS_NATURAL_HOLDOUT=true OMNILRS_NATURAL_MOTION=loop16 \
+OMNILRS_TERRAIN_NATIVE_PUBLISH=true \
+docker compose -f docker-compose.lunaryard.yml -f docker-compose.archive.yml \
+  up -d --no-deps astrobot-sim</code></pre></div>
+      <p><strong>Stop:</strong> Ctrl+C the foreground collector (revokes the acquisition grant), then stop the simulator explicitly if still running. Preserve all output folders and inspect their completion/failure status.</p>
+      <div class="command"><button class="copy" type="button" aria-label="Copy explicit simulator stop command">Copy</button><pre><code>docker stop -t 20 astrobot-sim-lunaryard</code></pre></div>
+      <p><strong>Do not call it passed from an exit code alone.</strong> Require completed simulator capture + sealed native stream + completed recorder + valid/completed mapper, matching received/integrated/projected counts, independent geometry/pose checks, sequence terrain safety and runtime gates. The documented latest run does not satisfy these.</p>
+    </details>
+  </section>
+
+  <section id="failures">
+    <div class="eyebrow">11 / Diagnose before tuning</div><h2>Failure points and the first place to look</h2>
+    <div class="table-wrap"><table><thead><tr><th>Symptom</th><th>Likely category / checks</th><th>Do not “fix” it by…</th></tr></thead><tbody>
+      <tr><td>Huge GT/GLIM disagreement from the start</td><td>World/home transform, base vs IMU body, near-180° IMU mount, LiDAR pitch, same-time GT snapshot. Audit physical geometry before estimator tuning.</td><td>Best-fitting the trajectories or silently flipping an extrinsic to reduce the metric.</td></tr>
+      <tr><td>Flat ground becomes speckled obstacles</td><td>Per-chunk pose/timing and ground-relative residuals; compare GT-isolated vs GLIM-input replay with the same raw data, lifetime and reference. Inspect local-fit/boundary evidence.</td><td>Flattening heights using GT labels, dropping awkward returns or increasing expiry until a final map looks good.</td></tr>
+      <tr><td>Unknown halo or weak free coverage</td><td>Reason codes, whole-cell support, occluded ground, short local evidence window, fixed-grid edge. Use coverage attribution against the original denominator.</td><td>Declaring no-return space free or removing conservative extent checks based only on recorded-course improvements.</td></tr>
+      <tr><td>Turn passes, next straight fails</td><td>Check route version, actual first-pose anchor, immutable connector and original survey envelope. v2 fixes the previous nominal-line inconsistency.</td><td>Widening lateral bounds, continuously moving the anchor or calling the displacement a proven frame mismatch.</td></tr>
+      <tr><td>Heartbeat expiry despite reasonable SLAM</td><td>Wall scheduling, simulator callback cost, GC, recorder/storage load and mapper CPU contention. Latest 0.437 s gen-2 GC coincided with fault; 0.581 s lease age. Correlation is not full attribution.</td><td>Relaxing the 0.5 s heartbeat or interpreting the whole-run 1.712 s maximum tick gap as the measured terminal stall.</td></tr>
+      <tr><td>Unknown map / latched shadow fault</td><td>Read status failure first: missing sequence, reset/epoch, late pose, unsupported revision, changed mount, publisher duplication, stale input or archive loss.</td><td>Reusing the last visible map as valid navigation input.</td></tr>
+      <tr><td>Occupied map looks safe, footprint hits wall</td><td>Downstream full-area/swept collision checks. Existing Nav2 center/perimeter primitive failures remain open; map correctness and controller safety are separate gates.</td><td>Assuming a 0.75 m inflation radius guarantees geometry cannot be crossed.</td></tr>
+      <tr><td>nvidia-smi works but Isaac fails</td><td>Run bounded CUDA context/allocation probe. NVML visibility does not establish CUDA usability. Preserve failed capture and request host repair if needed.</td><td>Repeated captures, implicit module reloads or writing archive workloads onto the workspace disk.</td></tr>
+    </tbody></table></div>
+    <p class="caption">Legacy Nav2 uses a footprint of approximately ±0.495 × ±0.335 m with 0.10 m padding and 0.75 m inflation radius. Those are not the acquisition survey's ±0.85 × ±0.70 m guard extents. Tracking unknown space and the planner's refusal of unknown space remain intentional.</p>
+  </section>
+
+  <section id="next">
+    <div class="eyebrow">12 / Promotion criteria</div><h2>What has to happen before large-scale navigation?</h2>
+    <ol>
+      <li><strong>Attribute and fix runtime stalls.</strong> Separate simulator/GC, native callback, ROS serialization, archive I/O and terrain projection costs. Keep timing failures and unchanged watchdogs; demonstrate live p95/p99 compliance rather than selecting the fastest repeat.</li>
+      <li><strong>Close the shutdown/invalidation gap.</strong> Test SIGINT between integration and projection, failure publication, queue flushing and completion sealing. Require unambiguous invalid/incomplete status and explicit counts for every terminal path.</li>
+      <li><strong>Finish the declared loop with the frozen estimator/mapper.</strong> Validate v2 driver anchors, complete native stream, all first-published associations, route-wide accuracy and sequence terrain safety. A return near the start is not itself a loop-closure optimization test.</li>
+      <li><strong>Generalize without retuning the denominator.</strong> Freeze the candidate and thresholds; run independently declared natural seeds/routes, turns, grid offsets and fault injections. Track positive hazards, dropoffs, coverage, latency and reset behavior separately.</li>
+      <li><strong>Promote through a separate navigation integration gate.</strong> Define map age/validity authority, conservative unknown policy, footprint-area and swept-motion collision vetoes, obstacle-distance cost gradient and command mux behavior. Test stop-on-stale/reset/mapper-exit before allowing autonomous goals.</li>
+      <li><strong>Then expand global behavior.</strong> Rolling/local versus long-term mapping, evidence expiry during long routes, graph correction rebuilds and recovery/exploration policy need explicit designs and their own tests. Do not enable global pose changes over stale accumulated terrain.</li>
+    </ol>
+    <div class="callout"><strong>Current decision</strong>Keep the terrain mapper advisory and the route driver independently guarded. The next decisive experiment is a <em>completed, timing-qualified controlled loop</em>, not a wider autonomous campaign or another unexplained GLIM parameter sweep.</div>
+  </section>
+  <footer>
+    <p>Maintained snapshot of the local repository and <a href="implementation-plan.md">implementation ledger</a>, dated 2026-09-22. Diagrams are explanatory schematics; numerical results are explicitly scoped to retained experiments. This page starts no processes, connects to no ROS bridge and loads no external resources.</p>
+    <p><a href="#main">Back to top ↑</a> · <a href="terrain-algorithm-overview.html">Historical interactive mapper fixture</a> · <a href="../../AGENTS.md">Full test/environment reference</a></p>
+    <p id="copy-status" role="status" aria-live="polite"></p>
+  </footer>
+</main>
+<script>
+  (() => {
+    const search = document.getElementById('topic-search');
+    const rows = [...document.querySelectorAll('#topic-table tbody tr')];
+    const count = document.getElementById('topic-count');
+    function filterTopics() {
+      const query = search.value.trim().toLowerCase();
+      let visible = 0;
+      for (const row of rows) {
+        row.hidden = !row.textContent.toLowerCase().includes(query);
+        if (!row.hidden) visible++;
+      }
+      count.textContent = `${visible} of ${rows.length} topics`;
+      document.getElementById('topic-empty').hidden = visible !== 0;
+    }
+    search.addEventListener('input', filterTopics);
+    filterTopics();
+    for (const button of document.querySelectorAll('.copy')) {
+      button.addEventListener('click', async () => {
+        const code = button.parentElement.querySelector('code');
+        try {
+          if (!navigator.clipboard || !window.isSecureContext) throw new Error('Clipboard unavailable');
+          await navigator.clipboard.writeText(code.textContent);
+          document.getElementById('copy-status').textContent = 'Command copied. Check its environment and motion label before running.';
+          button.textContent = 'Copied';
+          setTimeout(() => { button.textContent = 'Copy'; }, 2000);
+        } catch (_) {
+          const range = document.createRange();
+          range.selectNodeContents(code);
+          const selection = window.getSelection();
+          selection.removeAllRanges(); selection.addRange(range);
+          document.getElementById('copy-status').textContent = 'Command selected. Use your browser’s copy shortcut.';
+          button.textContent = 'Selected';
+        }
+      });
+    }
+    if ('IntersectionObserver' in window) {
+      const links = [...document.querySelectorAll('.sidebar nav a')];
+      const observer = new IntersectionObserver(entries => {
+        for (const entry of entries) if (entry.isIntersecting) {
+          for (const link of links) {
+            if (link.hash === '#' + entry.target.id) link.setAttribute('aria-current', 'location');
+            else link.removeAttribute('aria-current');
+          }
+        }
+      }, {rootMargin: '-10% 0px -65% 0px'});
+      for (const section of document.querySelectorAll('main section')) observer.observe(section);
+    }
+    document.documentElement.dataset.guideReady = 'true';
+  })();
+</script>
+</body>
+</html>

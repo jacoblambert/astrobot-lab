@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.16)
+project(nav2_shadow_probe)
+find_package(ament_cmake REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
+find_package(nav2_util REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(tf2_ros REQUIRED)
+add_executable(nav2_shadow_probe nav2_shadow_probe.cpp)
+target_compile_features(nav2_shadow_probe PRIVATE cxx_std_17)
+ament_target_dependencies(nav2_shadow_probe nav2_costmap_2d nav2_util rclcpp tf2_ros)
+# Standalone diagnostic executable; intentionally not installed into a ROS package.

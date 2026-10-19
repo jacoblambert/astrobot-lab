@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>synthetic_rtk</name>
+  <version>0.1.0</version>
+  <description>
+    Synthetic RTK / surface-beacon absolute-position source for the lunar rover.
+    Subscribes to ground-truth pose, adds baseline-scaled noise, dropout and
+    latency, and republishes an absolute-position measurement for GLIM to fuse.
+    Publishes a measurement topic only -- never a TF.
+  </description>
+  <maintainer email="jacob@example.com">Jacob Lambert</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>astrobot_core</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

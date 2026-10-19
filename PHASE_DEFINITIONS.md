@@ -5,7 +5,7 @@
 This document turns the high-level mission into an execution plan for the first practical milestone:
 
 1. Run a remote, headless OmniLRS-based exploration stack.
-2. Support more than one robot.
+2. Eventually support more than one robot.
 3. Build a LiDAR/IMU-first autonomy pipeline.
 4. Expose the system remotely through a usable operations UI.
 5. Add resource-finding logic and later advisory VLM reasoning.
@@ -18,17 +18,19 @@ The right order is:
 
 1. Remote observability and operator control.
 2. Single-robot autonomy vertical slice.
-3. Multi-robot namespacing and coordination.
-4. Resource simulation and mission weighting.
-5. Custom web UI.
-6. VLM advisory loop.
-7. Anomaly simulation and formal evaluation.
-8. White paper.
+3. Resource-aware single-robot exploration.
+4. Single-robot monitoring and debugging GUI.
+5. Single-robot reliability and gate automation.
+6. Multi-robot namespacing and coordination.
+7. VLM advisory loop.
+8. Anomaly simulation and formal evaluation.
+9. White paper.
 
 The main reason for this order:
 
 - Without remote observability, development speed is too low.
 - Without a single-robot vertical slice, multi-robot work is mostly fake complexity.
+- Without strong single-robot monitoring and debugging tools, multi-robot work hides root causes instead of proving capability.
 - Without a stable map/planner stack, VLM feedback has nothing useful to influence.
 - The VLM should start as an advisory system, not a control dependency.
 
@@ -79,7 +81,7 @@ The main reason for this order:
 
 1. Keep `astrobot-sim` responsible for simulation truth and sensor generation.
 2. Keep `astrobot-dev` responsible for autonomy, planning, UI backends, and evaluation.
-3. Start centralized before decentralized for multi-robot coordination.
+3. Start centralized before decentralized for multi-robot coordination, but only after single-robot behavior is stable and observable.
 4. Use 3D perception, but project to a weighted 2D BEV for planning.
 5. Treat the VLM as advisory first, never as the only decision-maker.
 6. Prefer existing ROS 2 tooling where it reduces risk, but avoid taking hard dependencies on stale multi-robot packages if they conflict with the desired architecture.
@@ -781,11 +783,208 @@ Autonomously explore using the BEV map and frontier/interest weighting.
 - time to first resource candidate
 - return success rate
 
-## Phase 5: Multi-Robot Foundation
+### Current status (2026-06-07)
+
+**Gate harness (delivered — this is also most of the Phase 6 deliverable, built early):**
+`tools/phase4_mission_gate_run.sh` (one seed×mode: fresh bring-up → settle gate → launch →
+preflight → GT-scored verdict → teardown, one retry) and `tools/phase4_gate_suite.sh`
+(seeds × modes matrix + JSON). Verdicts are **GT-scored** — never the mission's self-report,
+because gradual SLAM drift produces *false successes* (mission says "home", GT says metres away).
+Gates: `sample_return` = best_sample ≥ 0.75 **and** final GT pose ≤ 1 m from home;
+`explore_radius` = coverage ≥ 0.70 within the ~8 m mission radius **and** mission finished.
+Every run auto-starts the foxglove bridge (:8765) and the mission console backend (:8080) —
+standing practice after metrics-only validation repeatedly missed what one look at the console
+caught (see "hard lessons" below). See `useful_cmds.md` → "Phase 4 gate harness" for commands.
+
+**Current gate matrix (seeds 42 / 411 / 7, one retry):**
+
+| gate | 42 | 411 | 7 |
+|---|---|---|---|
+| sample_return | PASS | FAIL (SLAM accuracy) | PASS |
+| explore_radius | FAIL (17–71% cov) | FAIL (31–50%) | FAIL (23–25%) |
+
+**Changes that got the stack here (all validated):**
+- **GLIM on CPU** (config-only: `config_odometry_cpu.json`, mapping factors → CPU `VGICP`;
+  the lunar-gravity patch lives in shared `libglim.so`, below the CPU/GPU split). Eliminated the
+  GPU-contention freeze/runaway; the GPU is now Isaac-only. Going back to GPU GLIM requires GPU
+  serialization (MPS / dedicated GPU) — see `glim_slam_launch/config/glim_astrobot/README.md`.
+- **Rocks must NOT use the point instancer** (`use_point_instancer: False` in
+  `lunaryard_40m.yaml`) — point-instanced rocks are invisible to the RTX LiDAR; an "optimization"
+  that silently removed every rock for two days of runs. Rocks-as-LiDAR-features is also what
+  stabilizes GLIM (bare terrain → GICP slides/diverges; rocks-real → 0/9 divergence, sub-metre).
+- **BEV mapper retune** (`phase2_slam.launch.py`): `hit_log_odds 0.85→0.5`,
+  `decay_factor 0.97→0.998`, `max_voxels 1.2M→6M` — offline-swept on a recorded bag
+  (`tools/bev_sweep.sh`) and scored vs GT: rock feature-recall 21%→59%, flicker 1929→635
+  toggles/min, transient blips 655→145, precision held ~96%.
+- **Recovery cmd_vel wiring fix** (`phase1_nav.launch.py`): the behavior server had no remap and
+  published spin/backup commands onto the final `/cmd_vel`, fighting the mux at 20 Hz —
+  **recoveries were silently crippled since Phase 1**. Now remapped through the smoother→mux chain.
+- **Nav2 inflation** `0.45→0.72` (≥ footprint circumscribed radius 0.709) — kills the
+  slow-planning "failed to make progress" pathology near obstacles.
+- **BEV↔GT alignment canonicalized** (`tools/map_gt_alignment.py`, least-squares yaw+translation,
+  IMU→base aware) — used by the eval tooling and the console (GT overlay now aligned).
+- Mission/gate config: sample_return `max_duration 1200 s` / eval 1500 s (real rocks = slower nav);
+  explore `coverage_goal_fraction` must equal the gate (0.70) or runs time out `not_finished`
+  at gate-level coverage.
+
+**Known remaining blockers (characterized, with fix menu):**
+1. *Dense-cluster stalls* (kills explore_radius on all seeds): the rover noses into rock clusters
+   and stalls; MPPI dithers at ~0.01 m/s which defeats the controller progress checker
+   (0.10 m/10 s) so follow_path never fails and recoveries never trigger; the manager's
+   `no_progress` cancel floods the blacklist (29–56 failed goals/run) and starves coverage.
+   Fix candidates: tighten the progress checker; wedge detection (commanded-vs-actual motion
+   mismatch → backup); raise BEV recall to ~75% (`hit 0.5 / decay 1.0` + bigger voxel cap).
+2. *Seed-411 SLAM-accuracy variance* (sample_return): occasional divergence + ~5 m drift
+   false-success against the 1 m home tolerance (no loop closure). Loop-closure re-enable is the
+   structural fix (disabled in `c5f2da6` for the old catastrophic-divergence problem whose true
+   root causes — gravity, GPU contention, invisible rocks — are now all fixed).
+3. *resource_found trigger latency*: the threshold check only runs between goals; a qualifying
+   mid-goal sample waits out the goal (cost: a retry per occurrence). Fix: trigger mid-goal.
+
+**SLAM robustness — RTK / absolute-position fusion (2026-06-09, on by default).** Blocker #2 (SLAM
+drift/divergence) now has a structural fix *without* loop closure: an absolute position + heading
+source ("RTK from home" / surface beacon) fused into GLIM odometry. Additive only — `synthetic_rtk`
+(sim source) → `/rtk/pose` → `abs_constraint_module` (glim_ros2 fork) → position `GPSFactor` + yaw
+`PriorFactor` on the live pose; GLIM core is stock. Validated on a reproducible feature-poor divergence
+fixture (`rosbags/seed411_sparse_explore`): catastrophic GICP runaway **9480 m → ~1 m**, and long-drive
+drift **bounded ~0.3 m** (vs 2.5 m unbounded when RTK starves out of the graph). Key gotcha fixed: RTK
+timestamp association (`assoc_tolerance` 0.05→0.2 s) + 30 Hz republish, else RTK silently stops entering
+the graph. Note "full authority" (`gate_dist=0`, `huber_k=0`) means RTK is *never suppressed*, not that
+it outweighs the scan (the scan prior `Precision 1e3` > RTK ~400 per-frame; RTK works by accumulated
+absolute anchors). Hardware caveat: add a kinematic RTK-to-RTK gate (gate/Huber=0 has no bad-fix
+protection). Full design: `astrobot-lab/src/synthetic_rtk/README.md`.
+
+**Hard lessons encoded into process:** validate scene *content* visually, never metrics alone
+(invisible-rocks fiasco); never add observer processes to measurement runs (3 light recorders
+amplified a 2.5 m drift into 8–23 m divergences — recording now lives inside the eval node);
+GT-score everything (false successes are real); flip sim-fidelity switches only after checking
+the Phase 2 notes.
+
+## Phase 5: Single-Robot Monitoring and Debugging GUI
+
+### Goal
+
+Build the mission operations interface needed to lock in strong single-robot behavior before adding multi-robot complexity.
+
+### Recommendation
+
+This is now the immediate next phase after single-robot resource-aware exploration. It should be "high priority, small first version" rather than "first giant subsystem".
+
+The purpose is not polish. The purpose is to make long-running single-robot missions observable, explainable, and debuggable without shell access.
+
+### Recommended UI stack
+
+- React frontend
+- FastAPI backend
+- live transport:
+  - FastAPI WebSockets for mission state and commands
+  - Foxglove Bridge for high-throughput ROS introspection
+  - `web_video_server` for direct browser camera streaming if embedding video tiles is easier than decoding raw ROS image messages in your own frontend
+
+### Backend responsibilities
+
+- aggregate robot state
+- expose single-robot mission REST endpoints
+- relay operator commands
+- persist annotations and POIs
+- trigger bags, snapshots, and exports
+- summarize diagnostics, Nav2 state, SLAM health, and resource sampling
+- provide authentication if you later open access beyond SSH tunneling
+
+### Frontend responsibilities
+
+- single-robot mission overview:
+  - mode
+  - health
+  - current goal
+  - return-home state
+  - last update
+- live camera tiles
+- BEV map panel
+- GT resource map overlay for evaluation mode only
+- sampled resource trail and best sampled cell
+- selected-goal and rejected-goal overlays
+- mission-grid coverage display
+- diagnostics panel:
+  - SLAM-vs-GT error when GT is enabled for scoring
+  - SLAM jump indicators
+  - Nav2 failures and error codes
+  - planner precheck rejections
+  - safety cancellations
+- POI list
+- anomaly/resource event feed
+- operator commands:
+  - pause
+  - return home
+  - reassign goal
+  - mark POI
+
+### Validation
+
+- one browser over SSH tunnel can view the mission without shell access
+- operator can issue commands and see state updates
+- operator can explain why a goal was selected or rejected
+- operator can identify SLAM divergence, BEV/costmap problems, resource plateauing, and return-home state from the UI
+- camera/map/resource views remain usable under real network conditions
+
+### Metrics
+
+- UI latency
+- time-to-detect operator issues
+- operator task completion time
+- browser CPU/network load
+
+## Phase 6: Single-Robot Reliability and Gate Automation
+
+### Goal
+
+Use the GUI and diagnostics to harden single-robot autonomy until exploration, resource sampling, and return-home behavior are repeatable.
+
+### Why this comes before multi-robot
+
+Multi-robot behavior should not be used to hide single-robot instability. If one robot cannot be monitored, debugged, and validated over long runs, adding more robots multiplies ambiguity.
+
+### Deliverables
+
+- repeatable `explore_radius` and `sample_return` run presets
+- automated run summaries for:
+  - coverage
+  - best resource sample
+  - return-home success
+  - Nav2 failures
+  - safety cancellations
+  - planner precheck rejections
+  - SLAM jumps
+  - map publication rate
+- UI-accessible run artifacts and diagnostic exports
+- documented accepted seeds and known hard seeds
+- clear operator workflow for stopping, returning home, and exporting evidence
+
+### Validation
+
+- multiple randomized `explore_radius` missions pass the configured coverage and return-home gate
+- multiple randomized `sample_return` missions find above-threshold resources and return home
+- hard seeds are either passed or documented with root-cause evidence
+- no accepted run has unbounded SLAM drift or unexplained collision behavior
+
+### Metrics
+
+- coverage over time
+- mission success rate by seed
+- time to resource hit
+- return-home success rate
+- max SLAM-vs-GT error in scoring runs
+- operator diagnosis time from UI evidence
+
+## Phase 7: Multi-Robot Foundation
 
 ### Goal
 
 Scale the single-robot stack to a fleet without rewriting the architecture.
+
+### Hard prerequisite
+
+Do not start this phase until the single-robot GUI and reliability phases can explain and reproduce mission outcomes.
 
 ### Hard rule
 
@@ -843,112 +1042,6 @@ Borrow ideas, not architecture.
 - coordination latency
 - collision count
 - idle time per robot
-
-## Phase 6: Resource Simulation
-
-### Goal
-
-Introduce mission value beyond pure coverage.
-
-### `astrobot-sim` implementation
-
-- Add hidden resource layers to the environment:
-  - scalar field over terrain
-  - optional classes, e.g. ice/mineral
-- Add a resource sensor model:
-  - footprint
-  - noise
-  - false positive/negative model
-  - configurable sampling duration
-- Expose outputs through ROS topics/services/actions.
-
-### Start simple
-
-Version 1 should be:
-
-- a hidden geospatial scalar field
-- sampled when the robot is stopped or moving slowly
-- returned as a concentration/confidence estimate
-
-Do not start with a detailed physics model of a mass spectrometer.
-
-### `astrobot-dev` implementation
-
-- Convert detections into POI updates.
-- Allow the planner to trade off coverage vs expected resource utility.
-- Add revisit/inspection behavior.
-
-### Validation
-
-- resource ground truth is reproducible from seed
-- sensor outputs respond correctly over high and low concentration zones
-- planner prioritizes useful areas when configured to do so
-
-### Metrics
-
-- resource hit rate
-- false positive/false negative rate
-- time to first true hit
-- mission score = coverage + resource utility
-
-## Phase 7: Custom Remote GUI
-
-### Goal
-
-Build the mission operations interface you actually want, but after the telemetry contract is stable.
-
-### Recommendation
-
-This should be "high priority, small first version" rather than "first giant subsystem".
-
-### Recommended UI stack
-
-- React frontend
-- FastAPI backend
-- live transport:
-  - FastAPI WebSockets for mission state and commands
-  - Foxglove Bridge for high-throughput ROS introspection
-  - `web_video_server` for direct browser camera streaming if embedding video tiles is easier than decoding raw ROS image messages in your own frontend
-
-### Backend responsibilities
-
-- aggregate robot state
-- expose fleet and mission REST endpoints
-- relay operator commands
-- persist annotations and POIs
-- trigger bags, snapshots, and exports
-- provide authentication if you later open access beyond SSH tunneling
-
-### Frontend responsibilities
-
-- fleet overview
-- per-robot cards:
-  - mode
-  - health
-  - battery/mission proxy
-  - last update
-- live camera tiles
-- BEV map panel
-- POI list
-- anomaly/resource event feed
-- operator commands:
-  - pause
-  - return home
-  - reassign goal
-  - mark POI
-
-### Validation
-
-- one browser over SSH tunnel can view the mission without shell access
-- operator can issue commands and see state updates
-- multi-camera view remains usable under real network conditions
-
-### Metrics
-
-- UI latency
-- time-to-detect operator issues
-- operator task completion time
-- browser CPU/network load
 
 ## Phase 8: VLM Advisory Layer
 
@@ -1090,10 +1183,10 @@ If starting tomorrow, do this:
    - LIO-SAM ROS 2 branch
 5. BEV traversability + Nav2 Smac 2D planner
 6. Frontier exploration for one robot
-7. Multi-robot namespacing and fleet coordinator
-8. Shared map/traversability fusion
-9. Resource field + sensor simulation
-10. Custom React UI
+7. Single-robot monitoring/debugging GUI
+8. Single-robot long-run reliability and gate automation
+9. Multi-robot namespacing and fleet coordinator
+10. Shared map/traversability fusion
 11. Cosmos Reason2 advisory service
 12. Anomaly simulation
 13. White paper
@@ -1101,6 +1194,7 @@ If starting tomorrow, do this:
 ## What Not To Do First
 
 - Do not start with full multi-robot SLAM merge.
+- Do not start multi-robot work before single-robot missions are observable, repeatable, and debuggable.
 - Do not start with a polished React app before telemetry contracts exist.
 - Do not start with VLM-driven autonomy in the loop.
 - Do not start with detailed instrument-grade resource physics.

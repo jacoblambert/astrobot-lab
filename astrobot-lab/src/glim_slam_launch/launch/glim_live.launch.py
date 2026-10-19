@@ -21,12 +21,16 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("use_sim_time", default_value="true"),
             DeclareLaunchArgument("robot_namespace", default_value="astrobot_0"),
             DeclareLaunchArgument("config_path", default_value=default_config_path),
-            DeclareLaunchArgument("crop_min_x", default_value="0.20"),
-            DeclareLaunchArgument("crop_max_x", default_value="0.80"),
+            DeclareLaunchArgument("shadow_mode", default_value="false"),
+            DeclareLaunchArgument("shadow_seed_path", default_value=""),
+            # Self-filter box FLIPPED for the front+lower LiDAR re-mount (2026-06-13): LiDAR moved
+            # to base (0.40,0,0.25) so the chassis is now BEHIND/below it (negative x in lidar frame).
+            DeclareLaunchArgument("crop_min_x", default_value="-0.95"),
+            DeclareLaunchArgument("crop_max_x", default_value="0.05"),
             DeclareLaunchArgument("crop_min_y", default_value="-0.45"),
             DeclareLaunchArgument("crop_max_y", default_value="0.45"),
-            DeclareLaunchArgument("crop_min_z", default_value="-0.35"),
-            DeclareLaunchArgument("crop_max_z", default_value="0.05"),
+            DeclareLaunchArgument("crop_min_z", default_value="-0.30"),
+            DeclareLaunchArgument("crop_max_z", default_value="0.25"),
             GroupAction(
                 [
                     PushRosNamespace(robot_namespace),
@@ -50,27 +54,13 @@ def generate_launch_description() -> LaunchDescription:
                         ],
                     ),
                     Node(
-                        package="glim_ros",
-                        executable="glim_rosnode",
-                        name="slam",
+                        package="localization_supervisor",
+                        executable="localization_supervisor",
+                        name="localization_supervisor",
                         output="screen",
-                        parameters=[
-                            {
-                                "use_sim_time": use_sim_time,
-                                "config_path": config_path,
-                            }
-                        ],
-                        remappings=[
-                            ("~/pose", "slam/pose"),
-                            ("~/pose_corrected", "slam/pose_corrected"),
-                            ("~/odom", "slam/odom"),
-                            ("~/odom_corrected", "slam/odom_corrected"),
-                            ("~/aligned_points", "slam/aligned_points"),
-                            ("~/aligned_points_corrected", "slam/aligned_points_corrected"),
-                            ("~/points", "slam/points"),
-                            ("~/points_corrected", "slam/points_corrected"),
-                            ("~/map", "slam/glim_map"),
-                        ],
+                        parameters=[{"use_sim_time": use_sim_time, "config_path": config_path,
+                                     "shadow_seed_path": LaunchConfiguration("shadow_seed_path"),
+                                     "shadow_mode": ParameterValue(LaunchConfiguration("shadow_mode"), value_type=bool)}],
                     ),
                 ]
             ),
