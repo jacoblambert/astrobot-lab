@@ -67,9 +67,11 @@ class SyntheticRtkNode(Node):
         lever = self.declare_parameter("antenna_offset_xyz", [0.264, 0.017, 0.262]).value
         self.lever = np.array([float(lever[0]), float(lever[1]), float(lever[2])], dtype=float)
 
-        # Noise model: sigma(d) = sigma0 + sigma_per_m * baseline.
-        self.sigma0 = float(self.declare_parameter("sigma0", 0.05).value)
-        self.sigma_per_m = float(self.declare_parameter("sigma_per_m", 0.01).value)
+        # Noise model: sigma(d) = sigma0 + sigma_per_m * baseline. Defaults lowered
+        # 2026-10-20 from 0.05 + 0.01 d (0.6 m at 55 m: not a hardware model) to a
+        # still-pessimistic RTK fix (hardware RTK is ~1 cm + 1 ppm).
+        self.sigma0 = float(self.declare_parameter("sigma0", 0.02).value)
+        self.sigma_per_m = float(self.declare_parameter("sigma_per_m", 0.001).value)
         # Vertical noise is typically worse; scale relative to horizontal.
         self.sigma_z_scale = float(self.declare_parameter("sigma_z_scale", 2.0).value)
 

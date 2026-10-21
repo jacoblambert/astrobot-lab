@@ -15,6 +15,7 @@ pytest.importorskip("astrobot_interfaces.msg")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from archive_guard import allocate_run
 from run_shadow_capture import Capture, TOPICS, REQUIRED_TOPICS
+from shadow_capture_gate import HEARTBEAT_S
 import rclpy
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Imu
@@ -378,7 +379,7 @@ def test_driver_never_publishes_nonzero_without_fresh_lease(monkeypatch):
         config_sha256="c" * 64, sequence=1, stamp=10.), 10., wall)
     driver._publish(.15, 0.)
     assert commands[-1].linear.x == .15
-    monkeypatch.setattr(module.time, "monotonic", lambda: wall + .6)
+    monkeypatch.setattr(module.time, "monotonic", lambda: wall + HEARTBEAT_S + .1)
     with pytest.raises(ValueError, match="expired"):
         driver._publish(.15, 0.)
     assert commands[-1].linear.x == commands[-1].angular.z == 0.

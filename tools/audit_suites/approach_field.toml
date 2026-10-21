@@ -1,0 +1,18 @@
+# C4 sample fixture: approach_field (2026-10-20), 9.5 m out and 9.5 m back in reverse past demo
+# profile approach_field_v1 (0.12 / 0.20 / 0.30 / 0.40 m rocks, 0.61 m from the body, each passed
+# twice). Capture 2379e8d0, recorder 377f2609, pose audit 4046718a.
+[suite]
+name = "approach_field"
+every = 1
+
+[[jobs]]
+sources = ["revision-507b46e8"]
+profiles = [
+  "slam",
+  "gt",
+  "gt+h15,z1,y1,r0.35",      # C2 gate
+  "gt+h20,z1,y0.3,r0.2",     # horizontal knee
+  "gt+h15,z2,y0.3,r0.2",     # z knee
+  "gt+h15,z1,y0.3,r0.6",     # tilt knee
+  "gt+h15,z1.4,y0.35,r0.6",  # combined stress
+]

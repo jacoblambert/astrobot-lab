@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-from shadow_capture_gate import ShadowLease
+from shadow_capture_gate import HEARTBEAT_S, ShadowLease
 
 MAX_PACKET = 32768
 FIELDS = ("identity", "sequence", "sim_stamp", "wall_stamp", "failure", "first_grant")
@@ -97,7 +97,7 @@ class LeaseProcess(ShadowLease):
                 if now - started > 0.5:
                     raise ValueError("lease IPC query deadline exceeded")
                 receipt_age = None if result["wall_stamp"] is None else now - result["wall_stamp"]
-                if age <= 0.2 and (receipt_age is None or 0 <= receipt_age <= 0.5):
+                if age <= 0.2 and (receipt_age is None or 0 <= receipt_age <= HEARTBEAT_S):
                     for name in FIELDS:
                         setattr(self, name, result[name])
                     # Both clocks are rechecked after IPC. Child continuity is
@@ -106,7 +106,7 @@ class LeaseProcess(ShadowLease):
                 # Do NOT use the old snapshot. One fresh query can establish
                 # that the child continuously received grants during parent GC.
                 # Child expiry is sticky and never retried/revived. The whole
-                # read remains bounded by the original 500 ms heartbeat period.
+                # read remains bounded by the 500 ms IPC deadline.
             raise ValueError("stale lease IPC response after bounded refresh")
         except Exception as exc:
             self.failure = str(exc) or "lease receiver query failed"

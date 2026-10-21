@@ -9,6 +9,11 @@ import re
 import threading
 from collections import deque
 
+# Wall/sim heartbeat window for the capture lease and its inputs. Was 0.5 s; transit50
+# (Oct 21, recorder e19170de) tripped it at 510 sim-s when the recorder spent 0.63 s
+# decoding a 4878-frame GLIM revision plus a storage check. Sim-only convenience guard.
+HEARTBEAT_S = 2.
+
 
 class PhysicsIMUReadiness:
     """Optional experiment gate; no estimator input or timing corrections."""
@@ -66,7 +71,7 @@ class PhysicsIMUReadiness:
         return (len(common) >= 60
                 and all(abs((b-a)/1e9-1/60) <= 1e-5 for a, b in zip(common[-60:], common[-59:]))
                 and all(-.05 <= now_sim-stamp/1e9 <= .1 for stamp in (self.samples[-1], self.clocks[-1]))
-                and all(0 <= now_wall-wall <= .5 for wall in (self.sample_wall, self.clock_wall)))
+                and all(0 <= now_wall-wall <= HEARTBEAT_S for wall in (self.sample_wall, self.clock_wall)))
 
 
 class ShadowLease:
@@ -135,7 +140,7 @@ class ShadowLease:
             if self.identity is not None:
                 self._ready(now_sim, now_wall)  # A late heartbeat cannot revive an expired lease.
             stamp = grant["stamp"]
-            if not all(math.isfinite(x) for x in (stamp, now_sim, now_wall)) or not -.05 <= now_sim-stamp <= .5:
+            if not all(math.isfinite(x) for x in (stamp, now_sim, now_wall)) or not -.05 <= now_sim-stamp <= HEARTBEAT_S:
                 raise ValueError("shadow grant stale/future simulation time")
             if self.sim_stamp is not None and stamp < self.sim_stamp:
                 raise ValueError("shadow grant clock reversed")
@@ -160,8 +165,8 @@ class ShadowLease:
         if self.identity is None:
             return False
         if (not all(math.isfinite(x) for x in (now_sim, now_wall))
-                or not 0 <= now_wall-self.wall_stamp <= .5
-                or not -.05 <= now_sim-self.sim_stamp <= .5):
+                or not 0 <= now_wall-self.wall_stamp <= HEARTBEAT_S
+                or not -.05 <= now_sim-self.sim_stamp <= HEARTBEAT_S):
             self.failure = "shadow heartbeat expired or clock reversed"
             raise ValueError(self.failure)
         return True

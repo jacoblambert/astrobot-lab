@@ -12,6 +12,7 @@ import pytest
 pytest.importorskip("rclpy")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lease_process import LeaseProcess
+from shadow_capture_gate import HEARTBEAT_S
 from test_shadow_capture_gate import CAPTURE, grant
 
 
@@ -149,7 +150,7 @@ def test_dead_sender_expires_and_late_restart_cannot_revive(receiver, sender):
     armed(receiver)
     process.terminate()
     process.wait(timeout=5)
-    time.sleep(0.55)
+    time.sleep(HEARTBEAT_S + .05)
     sender()
     with pytest.raises(ValueError, match="expired"):
         receiver.ready(10.0, time.monotonic())
@@ -174,7 +175,7 @@ def test_main_simulation_clock_is_independently_checked(receiver, sender):
     sender()
     armed(receiver)
     with pytest.raises(ValueError, match="expired or clock reversed"):
-        receiver.ready(11.0, time.monotonic())
+        receiver.ready(10.5 + HEARTBEAT_S, time.monotonic())
 
 
 def test_child_hang_times_out_without_reusing_snapshot(receiver, sender):

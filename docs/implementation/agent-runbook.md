@@ -121,6 +121,167 @@ stay ineligible for completed-run evaluators even after restoration. Exact repla
 of a changed policy is not expected to match old decisions; preserve the frozen
 baseline source/library and label changed-policy comparisons separately.
 
+## October 20: SLAM + terrain robustness loop (C1-C4 scorecards)
+
+Decision context: `docs/decision-2026-10.md`. Thresholds live in `tools/audit_suites/checks*.toml`.
+All outputs are archive runs; scorecards are `scorecard.{md,json}` in the suite run.
+
+```bash
+# Host, after any terrain / gap-policy / scorer edit (~1 min; ~10 s with --reuse):
+tools/uv_python.sh tools/terrain_audit_suite.py quick [--reuse <prior quick run>] [--baseline <scorecard.json>]
+# Host, every capture x pose profile (parallel, one replay per core):
+tools/uv_python.sh tools/terrain_audit_suite.py full --reuse <prior full run> --baseline <prior scorecard.json>
+# Host, drives the dev container (astrobot-selected-dev) with docker exec; ~15 min:
+tools/uv_python.sh tools/terrain_audit_suite.py c3
+```
+
+- `--reuse` re-scores cached layers (`jobs/<slug>/layers.npz`) when the replay key (source,
+  profile, every, limit and replay code hash) is unchanged. Scorer or gap-policy changes then
+  re-score without replaying the native library.
+- Exit 0 = every check passes, 2 = a check failed or regressed (the scorecard is still written),
+  1 = a job crashed. Do not run the C3 suite alongside host suites: CPU load changes GLIM
+  latency (observer effect).
+- Action availability is scored on the costmap Nav2 would see: `navigation_costs` (gap policy),
+  then publisher-side `clear_footprint`, then Nav2 static/inflation, then the swept padded
+  footprint (`tools/local_terrain/nav2_contract.py`). The contract matches installed Nav2
+  inflation and swept area exactly (`NAV2_SHADOW_PROBE=... pytest tools/test/test_nav2_contract.py`
+  in the container, probe built as described below).
+- C3 replays use a shared per-recorder input (`audit_rtk_robustness.py <recorder> --make-base
+  [--no-supervisor]`, ~3.5 GB once) re-timed onto the recorded `/clock`. Bare GLIM runs are
+  exact at rate 2 with 4 in parallel; supervised runs need rate 1 (pose_stale is 0.5 sim-s).
+- Terrain profile `glim:<c3 run>` replays the terrain capture with that C3 run's GLIM poses. It
+  is only accepted for the capture whose `shadow_link.json` names the C3 recorder (loop16:
+  terrain `0113a562` / recorder `d4d0f081`).
+- RTK noise (user decision, Oct 20): synthetic_rtk defaults are now σ(d) = 0.02 + 0.001·d m
+  (z ×2); the old 0.05 + 0.01·d (0.6 m at the 55 m lunaryard baseline) was not a hardware
+  model. `c3.toml` sets `rtk_sigma = [0.02, 0.001]`: the base builder (`--make-base
+  --rtk-sigma S0,K`) rescales every recorded fix's own noise sample to that model, so the
+  recorded drive replays at the new level with the same noise realization. The runner refuses
+  a pinned base built at another `rtk_sigma`.
+- Nav2 planner costmap: `live_local_terrain.py` parameter `planner_gap_policy` (`""`,
+  `isolated` = the old `isolated_gap_costs`, or `nav2_bounded_shadow`; recorder
+  `--planner-gap-policy nav2_bounded_shadow`) publishes `/terrain_shadow/planner_costmap` via
+  `nav2_contract.planner_costs`, the function the suites score: gap policy, then the rover's
+  own unpadded footprint cleared at the record pose. Policies live in
+  `navigation_cost.PUBLISHED_POLICIES`.
+- Supervisor RTK gates are per axis (horizontal vs vertical σ, never a 3-D trace). While GLIM
+  runs, each fix is gated against GLIM's position at the fix stamp (0.1 m + 0.5 m/s over any
+  uncovered time + 6σ). Otherwise it is gated fix to fix at 0.5 m/s. A persistent outlier is
+  rejected until the 2 s outage fault holds motion. Supervised replays also write
+  `status.json`, the supervisor state timeline.
+
+### Archive cleanup (Oct 20): replacement config and library
+
+The Oct 20 cleanup removed every archive run older than Oct 19 ~19:00, plus the
+`terrain_entrypoints/` index and `contact-deps-OXpt89ix`. The commands in this runbook name
+deleted IDs; substitute:
+- config `revision-4c7b70a4…/config` → **`revision-ed871eabc2e64d1eb657d292e5d9ac77/config`**.
+  It is the frozen config (byte-identical copy `5c636f93`; three recorders' `config/` copies
+  agree) with only its two plugin paths moved to the rebuilt plugins below. `5c636f93` alone
+  does not run: GLIM exits on the deleted plugin paths (recorder `ae9ba662`, `estimator_exited`).
+- GLIM plugins `revision-009c6a6d…/{librevision_target_cpu,libclosed_window_abs}.so` →
+  **`revision-9f0c2307848742b4953ffc3847065065`**: built from `tools/glim_shadow` targets
+  `revision_target_cpu` / `closed_window_abs`, from sources last modified Sept 21 (before the Sept 22
+  original build). Sizes equal the originals' exactly (438,760 / 1,082,096 bytes); hashes differ.
+  `test_closed_window` and `test_revision_target` pass; every linked library was also loaded by
+  the live GLIM with the originals (recorder `10f448bf` runtime manifest).
+- library `revision-70647a2b…` → **`revision-06a82bedebf641418a4d6d420447cef2`**: same
+  `build_local_terrain.py` flags, all 17 sources hash-identical. The `.so` hash differs
+  (`cf7098b6…` vs `e452b2b6…`), but an exact receipt-order replay of capture `4ac1810d`, made
+  with the old library, reproduces all 1,163 recorded projections byte for byte.
+- `terrain_entrypoints/`: the HEAD-commit (`40bf078`) `live_local_terrain.py`,
+  `contact_advisory.py` and `contact_runtime.py` are re-archived from git (runs `340f63d3`,
+  `38ae287b`, `85c1b56f`), as is the Oct 20 worktree `live_local_terrain.py` (`e9500543`).
+- Shapely staging: not rebuilt. Only `--contact-advisory` needs it; restage Shapely 2.1.2 to
+  a new directory before using that flag.
+
+**Lost fixtures.** Every Oct 19 audit fixture lost its native capture run and pose export:
+detour `3ac40f8a` (quick suite), `236b00c7`, `0113a562` (loop16), `b47a9b95`, `f3b5f4d7`, and
+C3 recorder `d4d0f081`. Their terrain runs remain but can't be scored or exact-replayed. The
+quick, full and c3 suites need fresh captures; the Oct 19 numbers in `docs/decision-2026-10.md`
+stand as recorded but can't be reproduced.
+
+### New stress drives (Oct 20): `transit50`, `approach_field`
+
+Waypoint loops in `tools/natural_motion.py::WAYPOINTS` (seed 43, as every natural capture).
+Their clearance survey is a corridor of `ROTATION_RADIUS` (1.35 m) about the route, not the
+bounding box; each leg clears every seed-43 rock box by ≥ 1.43 m. Preflight PhysX overlap uses
+per-leg boxes plus chord strips per turn disc (`corridor_boxes`). The per-step footprint
+guard is unchanged.
+
+**Corridor floor is recorded, not gated (user decision, Oct 21).** The first transit50
+attempt (sim `9147eafa`, recorder `757ae0ea`) was refused preflight by the 2 cm detrended
+roughness limit (2.14 cm peak over 25 of 47k cells), and the recorder then sat out its 2 h
+wall limit. Sim captures are GT-scored; their guards exist for convenience, not safety. So
+for corridor routes (`floor_gate = "recorded_only_v1"`): incline, step and roughness are
+measured and listed under `floor_limit_violations` in `clearance.json`, but only the GT rock
+checks (PhysX overlap, first-hit terrain per cell) and a valid floor hit gate motion. The
+legacy box survey keeps its 2 cm / 0.35 limits. The recorder now fails after
+`--request-seconds` (900 s) without a sim capture request.
+
+Two more transit50 blockers, fixed Oct 21:
+- `EncodedFrames` capped capacity at 40,000 while transit50 declares 55,000 native frames
+  (sim `c051a745`, preflight). The cap, and `restore_native_archive.py`'s, is now 100,000.
+- At 510 sim-s (sim `6479a129`, recorder `e19170de`) the recorder spent 0.63 s in one loop
+  pass: a 0.25 s decode of a 4,878-frame GLIM revision (revisions carry the whole
+  trajectory, so they grow with the drive) plus a 0.38 s storage check. That starved the
+  0.5 s wall heartbeats (terrain status, physics IMU). All lease/heartbeat windows (recorder
+  checks, `PhysicsIMUReadiness`, `ShadowLease`, `LeaseProcess` receipt age, sim drive
+  watchdog) now use `shadow_capture_gate.HEARTBEAT_S` = 2 s. The 0.5 s IPC query deadline
+  is unchanged.
+- `transit50`: 50.5 m, 7 legs at 0.18 m/s (Nav2 `vx_max`), ~430 sim-s; crosses itself once at
+  (0, −8.5). C2 tilt/z at speed and C3 drift. The rock 1.4 m west of the spawn leaves only
+  south-east departures and a due-south return.
+- `approach_field`: 9.5 m out at 0.15 m/s past demo profile `approach_field_v1`, then 9.5 m
+  in reverse on the same lane (`return_reverse`, action `"reverse"`): rocks of 0.12 / 0.20 /
+  0.30 / 0.40 m, edges 0.95 m from the centreline (0.61 m from the body, inside the 1 m C4
+  danger range, outside the 0.82 m guard envelope), each passed twice. The survey exempts only
+  `/DemoApproachRocks/`; `validate_demo_clearance` rechecks the authored rocks preflight.
+
+**In-place turns are limited to 120° (`MAX_WAYPOINT_TURN`).** The skid-steer base turns about
+a point 9–13 cm behind `base_link` (least-squares fit to the loop16 and approach_field motion
+logs), so `base_link` orbits the waypoint. Past ~120° the rest of that orbit is sideways, which
+the base cannot correct before the turn ends. The first approach_field capture (`6bf40592`,
+out-and-back with a 180° turn) left the 25 cm skid bound at 141°. Waypoint loops declare
+`turn_translation_policy = anticipatory_corner_feedback_v3` (`waypoint_turn_lead`): turns
+≤ 90° keep loop16's lead; larger turns hold the lead along the current heading and fade it
+over the last 30°; the first rotation has no lead. loop16 keeps v2, unchanged. Kinematic
+model with 0–20 cm offsets: ≤ 0.17 m drift on every waypoint-loop turn.
+
+Same procedure as `costmap_detour8` above (recorder first, then the headless sim), with
+`--natural-motion transit50 --wall-seconds 7200` (or `approach_field --wall-seconds 3600`) and
+`SELECTED_DEMO_ROCK_PROFILE=approach_field_v1` for `approach_field` (empty for `transit50`):
+`bash docker/run_selected_headless.sh start transit50`. The capture, recorder and live
+terrain runs each take the route quota (`costmap_scenarios.WAYPOINT_ARCHIVE_GIB`: 40 GiB
+transit50, 12 GiB approach_field) plus the 50 GiB reserve at allocation; a 50 m drive writes
+~40 GB in total, so check archive space first. The recorder's wall limit is the route's
+`max_wall_s`. The selected dev container is in the same compose project: stop only the sim
+(`docker compose -f docker-compose.lunaryard.yml -f docker-compose.archive.yml -f
+docker-compose.selected-headless.yml stop astrobot-sim`, then `rm -f astrobot-sim`); `down`
+would also remove the dev container. Then add the capture/recorder to `full.toml` and
+`c3_transit.toml`.
+
+### Nav2 offline replay (Oct 22): recorded costmap through the real planner
+
+`tools/nav2_replay_check.py` runs two `planner_server`s (SmacPlanner2D, StaticLayer and
+InflationLayer from `nav2_phase3_bev.yaml`, wall time), one on the recorder bag's
+`/terrain_shadow/planner_costmap` and one on a GT rock-core grid. It scores every shadow path's
+swept body against GT and writes `summary.json`, `plans.jsonl` (with the paths) and the master
+costmaps. It needs the capture's pose audit (`pose_arrays.npz`). No sim. Run it in the dev
+container, with a separate `ROS_DOMAIN_ID` for each concurrent run:
+
+```bash
+docker exec -e ROS_DOMAIN_ID=183 astrobot-selected-dev bash -c 'source /etc/ros_setup.sh;
+  export PYTHONPATH=/archive/contact-deps-oct21:/workspace/astrobot-lab/tools:$PYTHONPATH;
+  cd /workspace/astrobot-lab; python3 tools/nav2_replay_check.py --recorder revision-2623e294 --every 2'
+# --global-map: plan on the mosaic of all windows so far (local_terrain/global_stitch.py),
+#   to home and to points --back 5 10 20 40 m along the route; use --every 10-20.
+```
+
+Pass: 0 `shadow_transit_hits_*` (contact before the 0.65 m goal tolerance) and
+`shadow_found_gt_blocked` 0. Arrival contacts are a goal-placement/controller matter. Results
+are in `docs/decision-2026-10.md` item 4.
+
 ## October 6: experimental planner costs and path checks
 
 This is costmap-to-path testing, not Nav2 command execution. Core files:
@@ -517,8 +678,10 @@ Use the root [AGENTS.md](../../AGENTS.md) for standing instructions and completi
   remain archived. The user-approved `relative_surface_v2` separates 2 cm
   tangent-compensated steps/plane-fit roughness from a 0.35 absolute incline cap;
   tests include smooth ramps and +/-8 cm steps on those ramps. This experimental
-  incline criterion is not vehicle traction/tipping certification. Do not relax
-  these criteria or lease limits to obtain a moving capture.
+  incline criterion is not vehicle traction/tipping certification. (Oct 21, user:
+  sim acquisition guards are convenience only and may be relaxed to keep testing; sim
+  world settings such as rock size and terrain need care. Corridor routes now record
+  these floor criteria without gating; see "New stress drives".)
   `bounded_minimum_v1` turn control uses a 0.04 rad/s minimum outside the original
   0.012 rad arrival tolerance, with the original 0.10 rad/s cap. Signed endpoint
   and lossy-actuator fixtures run in `test_natural_motion.py`; they are not live

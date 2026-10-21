@@ -61,7 +61,7 @@ def main():
     parser.add_argument("--probe", type=Path, required=True)
     parser.add_argument("--archive-root", type=Path, default=Path("/archive") if Path("/archive").is_dir() else ARCHIVE_ROOT)
     args = parser.parse_args()
-    output = allocate_run(args.archive_root)
+    output = allocate_run(args.archive_root, limit=1024**3)  # two small JSON/npz files
     print(f"Run: {output}", flush=True)
     try:
         sources = [args.library, args.probe, Path(__file__), Path(__file__).with_name("nav2_shadow_probe.py"),

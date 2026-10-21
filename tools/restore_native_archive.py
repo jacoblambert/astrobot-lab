@@ -74,7 +74,7 @@ def restore(run):
     if before.st_size != metadata["bytes"] or digest(packed) != metadata["sha256"]:
         raise ValueError("packed native source changed")
     frames = json.loads((run / "native_timing_audit.json").read_text())["frames"]
-    if not 0 < len(frames) <= 40000 or metadata["members"] != 2 * len(frames):
+    if not 0 < len(frames) <= 100000 or metadata["members"] != 2 * len(frames):
         raise ValueError("packed native denominator mismatch")
     expected = []
     for index, frame in enumerate(frames):

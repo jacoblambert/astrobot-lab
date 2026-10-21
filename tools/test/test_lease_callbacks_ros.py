@@ -17,7 +17,7 @@ from std_msgs.msg import String
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lease_callbacks import LeaseCallbacks
-from shadow_capture_gate import ShadowLease
+from shadow_capture_gate import HEARTBEAT_S, ShadowLease
 from test_shadow_capture_gate import CAPTURE, grant
 
 
@@ -46,7 +46,7 @@ def test_background_receives_real_grants_without_main_spin_and_dead_sender_still
             time.sleep(.06)  # No main-thread executor spin at any point.
         assert not failures and lease.sequence == 11
         assert lease.ready(10., time.monotonic())
-        time.sleep(.55)
+        time.sleep(HEARTBEAT_S + .05)
         with pytest.raises(ValueError, match="expired"):
             lease.ready(10., time.monotonic())
         publisher.publish(String(data=json.dumps(grant(sequence=12))))
@@ -120,7 +120,7 @@ def test_validation_gil_pause_uses_receipt_not_completion_time(checked):
         while lease.sequence < 0:
             assert time.monotonic() < deadline
             time.sleep(.001)
-        time.sleep(.22)
+        time.sleep(.22 + HEARTBEAT_S - .5)  # pause + validation exceed the heartbeat by 70 ms
         publisher.publish(String(data=json.dumps(grant(sequence=1))))
         assert completed.wait(2)
         if checked:
@@ -186,7 +186,7 @@ for seq in range(100):
         time.sleep(.12)  # Lease phase at tick entry; old main loop does not spin.
         libc = ctypes.PyDLL(None)  # Unlike CDLL, intentionally retains the GIL.
         libc.usleep.argtypes, libc.usleep.restype = [ctypes.c_uint], ctypes.c_int
-        assert libc.usleep(400000) == 0
+        assert libc.usleep(round((.4 + HEARTBEAT_S - .5)*1e6)) == 0  # 60 ms past the heartbeat
         time.sleep(.04)  # Remaining native file I/O; main still does not spin.
         if background:
             assert not failures and lease.sequence >= 4

@@ -1,0 +1,10 @@
+# After any terrain / gap-policy / scorer edit: one detour capture, every 5th projection.
+[suite]
+name = "quick"
+every = 5
+
+[[jobs]]
+# 833118eb: costmap_detour8 recaptured Oct 21 (capture 7ecd0ac9, recorder c1ab79c6) after
+# the Oct 20 archive cleanup removed 3ac40f8a's native capture.
+sources = ["revision-833118eb"]
+profiles = ["slam", "gt+h15,z1,y1,r0.35", "gt+h15,z1.4,y0.35,r0.6"]

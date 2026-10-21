@@ -1,0 +1,104 @@
+# C1-C4 thresholds (plan of 2026-10-19). Each check reduces one report metric over the
+# Gated policy: nav2_bounded_shadow (bounded unknown + unknown within 0.20 m of occupied published lethal).
+# jobs whose profile matches `profiles` (fnmatch) and compares it with `value`.
+# `tolerance` is the allowed baseline regression before --baseline flags it.
+#
+# Realistic pose sources: "slam" (recorded GLIM) and "glim:*" (C3 GLIM replays).
+# C2 gate profile: 15 cm horizontal / 1 deg yaw, with the recorded z and tilt deviation.
+
+[[checks]]
+criterion = "C1"
+name = "Nav2 bounded+shadow policy: frames with an action"
+profiles = ["slam", "glim:*"]
+metric = ["c1_gaps", "policies", "nav2_bounded_shadow", "frames_with_action"]
+reduce = "min"
+op = ">="
+value = 0.90
+tolerance = 0.01
+
+[[checks]]
+criterion = "C1"
+name = "Nav2 bounded+shadow policy: hidden-hazard rate of crossed unknown"
+profiles = ["slam", "glim:*"]
+metric = ["c1_gaps", "policies", "nav2_bounded_shadow", "hidden_hazard_rate"]
+reduce = "max"
+op = "<="
+value = 0.01
+tolerance = 0.002
+
+[[checks]]
+criterion = "C1"
+name = "Nav2 bounded+shadow policy: accepted sweeps over a >= 0.20 m hazard"
+profiles = ["slam", "glim:*"]
+metric = ["c1_gaps", "policies", "nav2_bounded_shadow", "chosen_unsafe_large"]
+reduce = "sum"
+op = "=="
+value = 0
+
+[[checks]]
+criterion = "C2"
+name = "open-floor phantom of observed cells"
+profiles = ["slam", "glim:*", "gt+h15,z1,y1,r0.35"]
+metric = ["c2_flat", "open_floor_phantom_of_observed"]
+reduce = "max"
+op = "<="
+value = 0.02
+tolerance = 0.002
+
+[[checks]]
+criterion = "C2"
+name = "frames with a phantom in the 1.5 m corridor ahead"
+profiles = ["slam", "glim:*", "gt+h15,z1,y1,r0.35"]
+metric = ["c2_flat", "frames_with_phantom_ahead"]
+reduce = "max"
+op = "<="
+value = 0.05
+tolerance = 0.01
+
+[[checks]]
+criterion = "C2"
+name = "Nav2 bounded+shadow policy still acts under pose error"
+profiles = ["gt+h15,z1,y1,r0.35"]
+metric = ["c1_gaps", "policies", "nav2_bounded_shadow", "frames_with_action"]
+reduce = "min"
+op = ">="
+value = 0.90
+tolerance = 0.02
+
+[[checks]]
+criterion = "C2"
+name = ">= 0.20 m objects unmarked within 2 m under pose error"
+profiles = ["gt+h15,z1,y1,r0.35"]
+metric = ["c4_recall", ">=0.20m", "within_2m_unmarked_frames"]
+reduce = "sum"
+op = "=="
+value = 0
+
+[[checks]]
+criterion = "C4"
+name = ">= 0.20 m objects unmarked within 2 m (any profile)"
+profiles = ["*"]
+metric = ["c4_recall", ">=0.20m", "within_2m_unmarked_frames"]
+reduce = "sum"
+op = "=="
+value = 0
+
+[[checks]]
+criterion = "C4"
+name = "footprint false-safe: accepted sweeps over a >= 0.20 m hazard"
+profiles = ["slam", "glim:*", "gt", "gt+h15,z1,y1,r0.35"]
+metric = ["c1_gaps", "policies", "nav2_bounded_shadow", "chosen_unsafe_large"]
+reduce = "sum"
+op = "=="
+value = 0
+
+[[checks]]
+criterion = "C4"
+name = "sample: >= 0.20 m object approaches inside the 1 m danger range"
+# Oct 20: 0. The six captures share one spawn: the same two rocks (instance_38, the detour
+# demo rock), closest 1.26 m. Closed only by a dedicated close-approach fixture.
+profiles = ["slam"]
+metric = ["c4_recall", ">=0.20m", "entered_danger"]
+reduce = "sum"
+op = ">="
+value = 3

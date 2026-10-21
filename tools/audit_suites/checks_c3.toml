@@ -1,0 +1,60 @@
+# C3 thresholds (plan of 2026-10-19), over audit_rtk_robustness.py reports.
+# Profiles are "sup:<profile>" or "bare:<profile>". Lengths in cm.
+
+[[checks]]
+criterion = "C3"
+name = "nominal max error (GLIM only)"
+profiles = ["bare:nominal"]
+metric = ["replay", "h_max_cm"]
+reduce = "max"
+op = "<="
+value = 30.0
+tolerance = 2.0
+
+[[checks]]
+criterion = "C3"
+name = "30 s outage: error during the outage (GLIM only)"
+profiles = ["bare:outage30"]
+metric = ["during", "h_max_cm"]
+reduce = "max"
+op = "<="
+value = 100.0
+tolerance = 5.0
+
+[[checks]]
+criterion = "C3"
+name = "no run diverges past 2 m"
+profiles = ["*"]
+metric = ["replay", "h_max_cm"]
+reduce = "max"
+op = "<="
+value = 200.0
+
+[[checks]]
+criterion = "C3"
+name = "supervisor holds motion within 2.5 s of an RTK outage"
+profiles = ["sup:outage*"]
+metric = ["supervision", "motion_held_after_s"]
+reduce = "max"
+op = "<="
+value = 2.5
+
+[[checks]]
+criterion = "C3"
+name = "supervisor permits motion through a nominal run"
+profiles = ["sup:nominal", "sup:noise5"]
+metric = ["supervision", "permitted_fraction_after_first"]
+reduce = "min"
+op = ">="
+value = 0.99
+tolerance = 0.01
+
+[[checks]]
+criterion = "C3"
+name = "published pose error while motion is permitted"
+profiles = ["sup:*"]
+metric = ["supervision", "published_h_max_cm_while_permitted"]
+reduce = "max"
+op = "<="
+value = 50.0
+tolerance = 5.0

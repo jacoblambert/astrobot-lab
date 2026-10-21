@@ -9,10 +9,33 @@ from natural_holdout import HOME, SEED
 from revision_evidence import validated_transform
 from costmap_scenarios import SCENARIOS, TRIAL_PATTERNS, scenario_spec
 
-PATTERNS = ("straight_slow", "turn15", "turn45", "turn360", "peek_reverse", "peek_reverse20", "combined10", "combined15", "loop16", "terrain_step", "costmap1", "costmap2", *SCENARIOS)
+# Waypoint loops beyond loop16 (2026-10-20, user-approved guard change): legs between
+# declared waypoints in the initial planar base frame, ending at home. Their clearance
+# survey covers a corridor around the route, not the bounding box (a 50 m loop's box
+# always contains rocks on seed 43). Each leg keeps >= ROTATION_RADIUS from every rock
+# box of the seed-43 natural scene (110 rocks; capture 070d4d8a natural_scene.json):
+# minimum 1.43 m, set by the rock 1.4 m west of the spawn, which also leaves only
+# south-east departures and a due-south return. Every in-place turn is <= 105 deg
+# (MAX_WAYPOINT_TURN); transit50 crosses itself once at (0, -8.5). approach_field passes
+# its own declared demo rocks (demo_rock_profile.APPROACH_PROFILE), which the survey
+# exempts, and reverses home on the same lane; the per-step footprint guard never exempts.
+WAYPOINTS = {
+    "transit50": dict(points=[(6., -10.), (1.5, -13.), (-1.5, -4.), (-6., -5.5), (-4.5, -10.), (0., -10.)], speed=.18,
+                      translation_leg_deadline_s=150., rotation_leg_deadline_s=120., max_wall_s=7200.),
+    "approach_field": dict(points=[(9.5*math.cos(math.radians(-28)), 9.5*math.sin(math.radians(-28)))], speed=.15,
+                           translation_leg_deadline_s=110., rotation_leg_deadline_s=120., max_wall_s=3600.,
+                           demo_rock_profile="approach_field_v1", survey_exempt_prefixes=["/DemoApproachRocks/"],
+                           return_reverse=True),
+}
+WAYPOINT_LOOPS = ("loop16", *WAYPOINTS)
+PATTERNS = ("straight_slow", "turn15", "turn45", "turn360", "peek_reverse", "peek_reverse20", "combined10", "combined15", "loop16", "terrain_step", "costmap1", "costmap2", *SCENARIOS, *WAYPOINTS)
 GRID = .05
 HALF = (.85, .70)  # Inflated footprint, same dimensions as guarded calibration.
 ROTATION_RADIUS = math.hypot(*HALF) + .25
+# Largest in-place turn of a waypoint loop. The base turns about a point behind base_link;
+# past ~120 deg the remaining orbit is sideways, which a skid-steer cannot correct before
+# the turn ends (kinematic model over 0-20 cm offsets; capture 6bf40592, 180 deg).
+MAX_WAYPOINT_TURN = math.radians(120)
 # Separate incline from local obstacles. This matches the retained mapper's
 # experimental incline cap, not a claim of validated vehicle tip/traction limits.
 MAX_SLOPE = .35
@@ -45,9 +68,73 @@ class SurveyLookup:
         return int(np.argmin((self.x-xy[0])**2 + (self.y-xy[1])**2))
 
 
+def waypoint_route(pattern):
+    """Initial rotate to the first leg, then translate/rotate per waypoint, home, rotate to 0.
+
+    return_reverse: the leg home is driven backwards on the previous heading ("reverse"), so
+    an out-and-back route needs no 180 deg turn (in-place turns past ~120 deg leave the 25 cm
+    skid bound: the base orbits a point behind base_link, see waypoint_turn_lead).
+    """
+    declared = WAYPOINTS[pattern]
+    vertices = [(0., 0.), *declared["points"], (0., 0.)]
+    targets, length = [], 0.
+    legs = list(zip(vertices, vertices[1:]))
+    for k, (start, end) in enumerate(legs):
+        heading = math.atan2(end[1]-start[1], end[0]-start[0])
+        if declared.get("return_reverse") and k == len(legs)-1:
+            targets.append((*map(float, end), targets[-1][2], "reverse"))
+        else:
+            targets += [(*map(float, start), heading, "rotate"), (*map(float, end), heading, "translate")]
+        length += math.dist(start, end)
+    targets.append((0., 0., 0., "rotate"))
+    for i, target in enumerate(targets):
+        previous = targets[i-1][2] if i else 0.
+        if target[3] == "rotate" and abs(wrap(target[2]-previous)) > MAX_WAYPOINT_TURN:
+            raise ValueError(f"{pattern} turn {i} exceeds {math.degrees(MAX_WAYPOINT_TURN):.0f} deg")
+    spec = dict(pattern=pattern, speed=declared["speed"], angular_speed=.1, targets=targets,
+                route_length_m=round(length, 3), coordinate_policy="initial_planar_base_xy_v1",
+                translation_policy="frozen_post_turn_connection_v3",
+                translation_endpoint_hold_m=.30,
+                turn_translation_policy="anticipatory_corner_feedback_v3",
+                turn_position_gain=.6, turn_max_linear_speed=.03, turn_reference_advance_m=.15,
+                turn_control_policy="bounded_minimum_v1", turn_min_angular_speed=.04,
+                turn_arrival_tolerance_rad=.012, pre_roll_s=3., post_roll_s=3., settle_s=1.,
+                max_wall_s=declared["max_wall_s"], translation_leg_deadline_s=declared["translation_leg_deadline_s"],
+                rotation_leg_deadline_s=declared["rotation_leg_deadline_s"],
+                clearance_policy="relative_surface_v2", floor_max_slope=MAX_SLOPE,
+                floor_relative_residual_m=SURFACE_RESIDUAL, floor_patch_radius_cells=PATCH_RADIUS,
+                floor_gate="recorded_only_v1",
+                floor_sample_spacing_m=GRID, inflated_half_footprint_m=list(HALF),
+                rotation_drift_limit_m=.25, translation_lateral_limit_m=.08,
+                translation_heading_limit_rad=.15, survey_region="route_corridor_v1",
+                survey_corridor_radius_m=ROTATION_RADIUS, natural_scene_seed=43)
+    for key in ("demo_rock_profile", "survey_exempt_prefixes"):
+        if key in declared:
+            spec[key] = declared[key]
+    return spec
+
+
+def route_vertices(spec):
+    """Planar route polyline (initial base frame) of a waypoint loop, home to home."""
+    return np.array([[0., 0.], *[t[:2] for t in spec["targets"] if t[3] != "rotate"]])
+
+
+def polyline_distance(vertices, xy):
+    """Distance of each point in xy (N, 2) to a polyline (M, 2)."""
+    xy = np.atleast_2d(np.asarray(xy, dtype=float))
+    best = np.full(len(xy), np.inf)
+    for a, b in zip(vertices[:-1], vertices[1:]):
+        ab = b-a
+        t = np.clip(((xy-a) @ ab)/max(float(ab @ ab), 1e-18), 0., 1.)
+        best = np.minimum(best, np.linalg.norm(xy-(a+t[:, None]*ab), axis=1))
+    return best
+
+
 def route(pattern):
     if pattern not in PATTERNS:
         raise ValueError("undeclared natural motion pattern")
+    if pattern in WAYPOINTS:
+        return waypoint_route(pattern)
     if pattern == "loop16":
         # Local planar XY, body yaw, action. Distinct acquisition dose, never
         # substituted for the 4 m development route or used as navigation policy.
@@ -198,7 +285,7 @@ def world_target(origin, distance, heading):
 def survey_points(origin, pattern):
     """Conservative bounding region covers translation, turns and skid envelope."""
     spec = route(pattern)
-    if pattern == "loop16" or pattern in SCENARIOS:
+    if pattern in WAYPOINT_LOOPS or pattern in SCENARIOS:
         angle = yaw(origin)
         rotation = np.array([[math.cos(angle), -math.sin(angle)], [math.sin(angle), math.cos(angle)]])
         targets = spec["targets"]
@@ -227,7 +314,70 @@ def survey_points(origin, pattern):
     return np.array([(a, b) for a in x for b in y]), (len(x), len(y))
 
 
-def ground_sample(hits):
+def survey_mask(origin, pattern, points):
+    """Corridor routes: which bounding-grid points to survey (None = every point).
+
+    A point is surveyed when within the corridor radius plus one grid diagonal of the
+    route polyline, so every admitted footprint/turn pose stays on surveyed cells.
+    """
+    spec = route(pattern)
+    if spec.get("survey_region") != "route_corridor_v1":
+        return None
+    angle = yaw(origin)
+    rotation = np.array([[math.cos(angle), -math.sin(angle)], [math.sin(angle), math.cos(angle)]])
+    vertices = origin[:2, 3] + route_vertices(spec) @ rotation.T
+    return polyline_distance(vertices, points) <= spec["survey_corridor_radius_m"] + GRID*math.sqrt(2)
+
+
+def corridor_boxes(origin, pattern, strips=64):
+    """Oriented boxes (center_xy, half_xy, angle) whose union covers the survey corridor.
+
+    One box per leg (exactly the corridor's straight part) and, per vertex, `strips`
+    chord strips covering the rotation disc (overshoot under one strip width: 4 cm at 64).
+    """
+    spec = route(pattern)
+    radius = spec["survey_corridor_radius_m"]
+    angle = yaw(origin)
+    rotation = np.array([[math.cos(angle), -math.sin(angle)], [math.sin(angle), math.cos(angle)]])
+    vertices = origin[:2, 3] + route_vertices(spec) @ rotation.T
+    boxes = []
+    for a, b in zip(vertices[:-1], vertices[1:]):
+        length = float(np.linalg.norm(b-a))
+        if length > 0:
+            boxes.append(((a+b)/2, (length/2, radius), math.atan2(b[1]-a[1], b[0]-a[0])))
+    width = 2*radius/strips
+    for v in vertices[:-1]:  # the last vertex is home again
+        for k in range(strips):
+            low, high = -radius + k*width, -radius + (k+1)*width
+            near = 0. if low < 0 < high else min(abs(low), abs(high))
+            half = math.sqrt(max(radius**2 - near**2, 0.))
+            boxes.append((v + np.array([0., (low+high)/2]), (half, width/2), 0.))
+    return boxes
+
+
+def validate_demo_clearance(origin, pattern, objects):
+    """Declared demo rocks the survey exempts must clear the per-step guard footprint.
+
+    Guard footprint (HALF) plus admitted tracking (lateral limit and heading limit) about
+    the route centreline; turns keep the full rotation radius.
+    """
+    spec = route(pattern)
+    angle = yaw(origin)
+    rotation = np.array([[math.cos(angle), -math.sin(angle)], [math.sin(angle), math.cos(angle)]])
+    vertices = origin[:2, 3] + route_vertices(spec) @ rotation.T
+    lateral = HALF[1] + spec["translation_lateral_limit_m"] + HALF[0]*math.sin(spec["translation_heading_limit_rad"])
+    report = []
+    for obj in objects:
+        xy = np.asarray(obj["points"])[:, :2]
+        leg = float(polyline_distance(vertices, xy).min())
+        turn = float(min(np.linalg.norm(xy-v, axis=1).min() for v in vertices))
+        report.append(dict(path=obj["path"], route_distance_m=leg, turn_distance_m=turn))
+        if leg <= lateral or turn <= ROTATION_RADIUS:
+            raise ValueError(f"demo rock {obj['path']} inside the guarded route envelope")
+    return dict(lateral_envelope_m=lateral, rotation_radius_m=ROTATION_RADIUS, objects=report)
+
+
+def ground_sample(hits, max_slope=MAX_SLOPE):
     hits = [h for h in hits if not h[3].startswith("/Robots/")]
     if not hits or not hits[0][3].startswith("/Lunaryard/Terrain/"):
         raise ValueError("swept region contains rock, missing floor or nonterrain support")
@@ -236,12 +386,14 @@ def ground_sample(hits):
     if (normal.shape != (3,) or position.shape != (3,) or not np.isfinite([normal, position]).all()
             or abs(np.linalg.norm(normal)-1.) > .001):
         raise ValueError("invalid swept floor geometry")
-    if normal[2] < math.cos(math.atan(MAX_SLOPE)):
-        raise ValueError(f"swept floor slope exceeds {MAX_SLOPE}")
+    if max_slope is not None and normal[2] < math.cos(math.atan(max_slope)):
+        raise ValueError(f"swept floor slope exceeds {max_slope}")
     return float(position[2])
 
 
-def validate_ground_tile(points, heights, shape, normals):
+def validate_ground_tile(points, heights, shape, normals, mask=None):
+    if mask is not None:
+        return validate_ground_corridor(points, heights, shape, normals, mask)
     points, heights, normals = (np.asarray(v, dtype=float) for v in (points, heights, normals))
     if (len(shape) != 2 or min(shape) < 3 or points.shape != (math.prod(shape), 2)
             or heights.shape != (len(points),) or normals.shape != (len(points), 3)
@@ -291,12 +443,93 @@ def validate_ground_tile(points, heights, shape, normals):
                 geometry_only=True, navigation_labels=False, finite_sampling_not_mesh_proof=True)
 
 
+def validate_ground_corridor(points, heights, shape, normals, mask):
+    """validate_ground_tile metrics on the masked cells of the ordered grid (outside: not surveyed).
+
+    Same metrics: absolute incline per normal, two-sided tangent discontinuity between
+    surveyed neighbours, and a 9x9 plane fit (surveyed cells only) per surveyed cell for
+    patch incline and detrended roughness. Vectorised normal equations, not lstsq.
+
+    Recorded, not gated (user, 2026-10-20): sim acquisition guards are convenience only.
+    The corridor gate is GT rock clearance (PhysX overlap along the route) plus a valid
+    terrain hit per cell; floor limits only report under floor_limit_violations.
+    """
+    points, heights, normals = (np.asarray(v, dtype=float) for v in (points, heights, normals))
+    inside = np.asarray(mask, dtype=bool)
+    if (len(shape) != 2 or min(shape) < 3 or points.shape != (math.prod(shape), 2)
+            or heights.shape != (len(points),) or normals.shape != (len(points), 3) or inside.shape != (len(points),)
+            or inside.sum() < 9 or not np.isfinite(points).all() or not np.isfinite(heights[inside]).all()
+            or not np.isfinite(normals[inside]).all() or np.any(abs(np.linalg.norm(normals[inside], axis=1)-1.) > .001)
+            or np.any(normals[inside, 2] <= 0)):
+        raise ValueError("invalid floor tile")
+    xy, valid = points.reshape(*shape, 2), inside.reshape(shape)
+    values = np.where(valid, heights.reshape(shape), 0.)
+    safe = np.where(inside[:, None], normals, [0., 0., 1.])
+    gradients = (-safe[:, :2]/safe[:, 2:]).reshape(*shape, 2)
+    maximum_gradient = float(np.max(np.linalg.norm(gradients, axis=2)))
+    maximum_jump = 0.
+    for axis in (0, 1):
+        delta = np.diff(xy, axis=axis)
+        expected = np.zeros_like(delta); expected[..., axis] = GRID
+        if not np.allclose(delta, expected, atol=1e-8, rtol=0):
+            raise ValueError("floor tile is not the declared ordered grid")
+        dz = np.diff(values, axis=axis)
+        lo = [slice(None)]*2; hi = lo.copy()
+        lo[axis], hi[axis] = slice(None, -1), slice(1, None)
+        pair = valid[tuple(lo)] & valid[tuple(hi)]
+        for side in (tuple(lo), tuple(hi)):
+            residual = abs(dz-np.sum(gradients[side]*delta, axis=2))
+            if pair.any():
+                maximum_jump = max(maximum_jump, float(residual[pair].max()))
+    r = PATCH_RADIUS
+    pad = lambda a: np.pad(a, r)  # noqa: E731
+    w, z = pad(valid.astype(float)), pad(values)
+    offsets = [(di, dj) for di in range(-r, r+1) for dj in range(-r, r+1)]
+    window = lambda a, di, dj: a[r+di:r+di+shape[0], r+dj:r+dj+shape[1]]  # noqa: E731
+    # Grid axis 0 is x, axis 1 is y (survey_points order); offsets in metres.
+    sums = np.zeros((*shape, 3, 3)); rhs = np.zeros((*shape, 3))
+    for di, dj in offsets:
+        wk, zk = window(w, di, dj), window(z, di, dj)
+        basis = np.array([di*GRID, dj*GRID, 1.])
+        sums += wk[..., None, None]*np.outer(basis, basis)
+        rhs += (wk*zk)[..., None]*basis
+    cells = np.argwhere(valid)
+    plane = np.full((*shape, 3), np.nan)
+    A, b = sums[valid], rhs[valid]
+    solvable = np.linalg.matrix_rank(A) == 3
+    plane[tuple(cells[solvable].T)] = np.linalg.solve(A[solvable], b[solvable][..., None])[..., 0]
+    for i, j in cells[~solvable]:  # degenerate surveyed patch (collinear support): exact lstsq
+        mask_ij = [(di, dj) for di, dj in offsets if 0 <= i+di < shape[0] and 0 <= j+dj < shape[1] and valid[i+di, j+dj]]
+        design = np.array([[di*GRID, dj*GRID, 1.] for di, dj in mask_ij])
+        plane[i, j] = np.linalg.lstsq(design, [values[i+di, j+dj] for di, dj in mask_ij], rcond=None)[0]
+    maximum_incline = float(np.max(np.linalg.norm(plane[valid][:, :2], axis=1)))
+    maximum_roughness = 0.
+    for di, dj in offsets:
+        wk, zk = window(w, di, dj) > 0, window(z, di, dj)
+        fit = plane[..., 0]*di*GRID + plane[..., 1]*dj*GRID + plane[..., 2]
+        use = wk & valid
+        if use.any():
+            maximum_roughness = max(maximum_roughness, float(abs(zk-fit)[use].max()))
+    violations = [name for name, value, limit in (
+        ("absolute_incline", maximum_gradient, MAX_SLOPE), ("patch_incline", maximum_incline, MAX_SLOPE),
+        ("relative_discontinuity", maximum_jump, SURFACE_RESIDUAL),
+        ("detrended_roughness", maximum_roughness, SURFACE_RESIDUAL)) if value > limit]
+    surveyed = values[valid]
+    return dict(samples=int(valid.sum()), spacing_m=GRID, minimum_z=float(surveyed.min()),
+                maximum_z=float(surveyed.max()), clearance_policy="relative_surface_v2", shape=list(shape),
+                survey_region="route_corridor_v1", floor_gate="recorded_only_v1",
+                maximum_absolute_incline=maximum_gradient, floor_limit_violations=violations,
+                maximum_relative_discontinuity_m=maximum_jump, maximum_detrended_roughness_m=maximum_roughness,
+                maximum_patch_incline=maximum_incline, absolute_incline_limit=MAX_SLOPE,
+                geometry_only=True, navigation_labels=False, finite_sampling_not_mesh_proof=True)
+
+
 def motion_command(origin, current, pattern, index, *, segment_start=None):
     if pattern in TRIAL_PATTERNS:
         raise ValueError("terrain step trial cannot use GT waypoint commands")
     origin, current = validated_transform(origin), validated_transform(current)
     spec = route(pattern)
-    if pattern == "loop16":
+    if pattern in WAYPOINT_LOOPS:
         return loop_command(origin, current, index, spec, segment_start=segment_start)
     distance, heading = spec["targets"][index]
     target = world_target(origin, distance, heading)
@@ -345,6 +578,30 @@ def motion_command(origin, current, pattern, index, *, segment_start=None):
     return linear, float(np.clip(angle, -.1, .1)), abs(longitudinal) < spec.get("translation_arrival_tolerance_m", .02)
 
 
+def waypoint_turn_lead(spec, index, remaining, direction, entry_heading):
+    """Along-heading lead (m) of a v3 waypoint-loop rotation; the target stays the waypoint.
+
+    The skid-steer base turns about a point ~9-13 cm behind base_link (fit to loop16 and
+    approach_field motion logs), so base_link orbits the waypoint. v2 holds the advance
+    along the ENTRY heading: fine to 90 deg, but past 90 deg it points behind the base and
+    cancels the sideways skid error it should correct (capture 6bf40592 left the 25 cm
+    bound at 141 deg of a 180 deg turn). v3:
+    - turns up to 90 deg after a translation: the v2 lead, the advance projected on the
+      current heading, never negative;
+    - larger turns: the advance along the CURRENT heading, which keeps the turn centre on
+      the waypoint, faded out over the last 30 deg so the base arrives on it;
+    - the first rotation has no incoming translation and no lead.
+    Kinematic model with that offset: worst drift 0.16 m on the 180 deg turn (v2: fails).
+    """
+    previous = spec["targets"][index-1][2] if index else 0.
+    advance = spec["turn_reference_advance_m"]
+    if abs(wrap(spec["targets"][index][2] - previous)) > math.pi/2:
+        return advance * min(1., abs(remaining)/math.radians(30))
+    if not index or spec["targets"][index-1][3] != "translate":
+        return 0.
+    return advance * max(0., float(np.array([math.cos(entry_heading), math.sin(entry_heading)]) @ direction))
+
+
 def loop_command(origin, current, index, spec, *, segment_start=None):
     if isinstance(index, bool) or not isinstance(index, (int, np.integer)) or not 0 <= index < len(spec["targets"]):
         raise ValueError("invalid loop segment")
@@ -368,6 +625,12 @@ def loop_command(origin, current, index, spec, *, segment_start=None):
         # reference, not a new waypoint or a moving/reanchored safety envelope.
         # The arrival heading and radius above still use the nominal target.
         entry_heading = base_yaw + spec["targets"][index-1][2]
+        if spec["turn_translation_policy"] == "anticipatory_corner_feedback_v3":
+            lead = waypoint_turn_lead(spec, index, angle, direction, entry_heading)
+            linear = 0. if arrived else float(np.clip(
+                spec["turn_position_gain"] * ((target-current[:2, 3]) @ direction + lead),
+                -spec["turn_max_linear_speed"], spec["turn_max_linear_speed"]))
+            return linear, angular, arrived
         reference = target + spec["turn_reference_advance_m"] * np.array(
             [math.cos(entry_heading), math.sin(entry_heading)])
         linear = 0. if arrived else float(np.clip(
@@ -386,13 +649,18 @@ def loop_command(origin, current, index, spec, *, segment_start=None):
     error = target-current[:2, 3]
     longitudinal = float(error @ direction)
     lateral = abs(float(error @ np.array([-direction[1], direction[0]])))
-    angle = wrap(math.atan2(direction[1], direction[0])-yaw(current))
+    # A "reverse" leg drives backwards: the base faces away from the direction of travel.
+    sign = -1. if action == "reverse" else 1.
+    angle = wrap(math.atan2(sign*direction[1], sign*direction[0])-yaw(current))
     # Keep the same overall surveyed center envelope, even when an actual
     # corner offset and tracking error point in the same outward direction.
     local = rotation.T @ (current[:2, 3]-origin[:2, 3])
     vertices = np.array([[0., 0.], *[t[:2] for t in spec["targets"]]])
-    outside = local-np.clip(local, vertices.min(0), vertices.max(0))
-    if np.linalg.norm(outside) > spec["rotation_drift_limit_m"]:
+    if spec.get("survey_region") == "route_corridor_v1":
+        outside = polyline_distance(route_vertices(spec), local)[0]
+    else:
+        outside = np.linalg.norm(local-np.clip(local, vertices.min(0), vertices.max(0)))
+    if outside > spec["rotation_drift_limit_m"]:
         raise ValueError("connection left surveyed center envelope")
     if (lateral > spec["translation_lateral_limit_m"] or abs(angle) > spec["translation_heading_limit_rad"]
             or not -.10 <= length-longitudinal <= length+.10):
@@ -400,38 +668,47 @@ def loop_command(origin, current, index, spec, *, segment_start=None):
     arrived = np.linalg.norm(error) < .02
     # Steer back toward the fixed endpoint, not just parallel to the leg.
     # Frozen cross-track guard above cannot be hidden by reanchoring each tick.
-    desired = wrap(math.atan2(error[1], error[0])-yaw(current)) if longitudinal >= 0 else angle
-    linear = math.copysign(min(spec["speed"], max(.02, abs(longitudinal)*.5)), longitudinal)
+    desired = wrap(math.atan2(sign*error[1], sign*error[0])-yaw(current)) if longitudinal >= 0 else angle
+    if spec["translation_policy"] == "frozen_post_turn_connection_v3":
+        # Near the endpoint its bearing swings with any lateral offset (approach_field
+        # capture 569ba2de: 3 cm lateral, 1.5 cm to go -> 8.6 deg heading, past the 0.15 rad
+        # bound). Hold the leg heading for the last translation_endpoint_hold_m and arrive
+        # on the along-leg distance; the lateral bound above still holds.
+        if longitudinal < spec["translation_endpoint_hold_m"]:
+            desired = angle
+        arrived = abs(longitudinal) < .02
+    linear = sign*math.copysign(min(spec["speed"], max(.02, abs(longitudinal)*.5)), longitudinal)
     return linear, float(np.clip(desired, -.1, .1)), arrived
 
 
 def leg_deadline(pattern, index):
     spec = route(pattern)
-    if pattern == "loop16":
+    if pattern in WAYPOINT_LOOPS:
         return spec["rotation_leg_deadline_s"] if spec["targets"][index][3] == "rotate" else spec["translation_leg_deadline_s"]
     return 65. if pattern == "straight_slow" else 40.
 
 
-def validate_loop_turn_feedback(origin, current, index, linear, angular):
-    expected = motion_command(origin, current, "loop16", index)
-    if route("loop16")["targets"][index][3] != "rotate":
+def validate_loop_turn_feedback(origin, current, index, linear, angular, pattern="loop16"):
+    expected = motion_command(origin, current, pattern, index)
+    if route(pattern)["targets"][index][3] != "rotate":
         raise ValueError("turn feedback audit requires a turn segment")
     if not np.allclose([linear, angular], expected[:2], atol=1e-9, rtol=0):
         raise ValueError("recorded loop turn differs from declared feedback policy")
 
 
-def validate_loop_connection_log(rows):
+def validate_loop_connection_log(rows, pattern="loop16"):
     """Each actual leg start is a recorded pose, frozen until that leg ends."""
+    actions = [t[3] for t in route(pattern)["targets"]]
     starts = {}
     previous = -1
     for row in rows:
         index = row.get("arrived_segment")
         if index is None:
             index = row["index"]
-        if not 0 <= index < 8 or index < previous or index > previous+1:
+        if not 0 <= index < len(actions) or index < previous or index > previous+1:
             raise ValueError("loop segment log order invalid")
         value = row.get("segment_start")
-        if index % 2 == 0:
+        if actions[index] != "rotate":
             anchor = validated_transform(value)
             if index not in starts:
                 if not np.array_equal(anchor, np.asarray(row["world_from_base"])):
@@ -491,7 +768,8 @@ def audit_motion_artifacts(capture, recorder, request, complete, grant, configs)
         raise ValueError("natural route was not completed")
     origin = np.asarray(clearance["origin"])
     rows = [json.loads(line) for line in paths[2].read_text().splitlines()]
-    starts = validate_loop_connection_log(rows) if request["pattern"] == "loop16" else {}
+    starts = (validate_loop_connection_log(rows, request["pattern"]) if request["pattern"] in WAYPOINT_LOOPS
+              else {})
     for row in reached:
         anchor = starts.get(row["index"])
         if anchor is not None and not np.array_equal(anchor, np.asarray(row.get("segment_start"))):
@@ -526,7 +804,7 @@ def audit_motion_artifacts(capture, recorder, request, complete, grant, configs)
             if request["pattern"] == "turn360" and not np.allclose(
                     [row["linear"], row["angular"]], expected[:2], atol=1e-9, rtol=0):
                 raise ValueError("recorded observation turn differs from fixed-origin feedback")
-            if request["pattern"] == "loop16" and spec["targets"][index][3] == "rotate":
+            if request["pattern"] in WAYPOINT_LOOPS and spec["targets"][index][3] == "rotate":
                 validate_loop_turn_feedback(origin, np.asarray(row["world_from_base"]), index,
-                                            row["linear"], row["angular"])
+                                            row["linear"], row["angular"], request["pattern"])
     return paths

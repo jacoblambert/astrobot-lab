@@ -101,3 +101,27 @@ def test_diagnostic_mesh_queries_preserve_authored_precision_and_misses():
     assert hits and hits[0]["distance"] == pytest.approx(1 - float(np.float32(HEIGHT)), abs=1e-14, rel=0)
     assert hits[0]["collision"] == "rock"
     assert mesh_hits([obj], [0.2, 0, 1], [0, 0, -1], 2) == []
+
+
+def test_approach_field_rocks_sit_in_danger_range_but_clear_the_guard_and_turns():
+    import math
+    from demo_rock_profile import APPROACH_PROFILE, approach_layout, validate_profile
+    from natural_motion import HALF, ROTATION_RADIUS, route, route_vertices, polyline_distance
+
+    spec = route("approach_field")
+    far = route_vertices(spec)[1]
+    length = float(np.linalg.norm(far))
+    guard = HALF[1] + spec["translation_lateral_limit_m"] + HALF[0] * math.sin(spec["translation_heading_limit_rad"])
+    for (along, lateral), height, width in approach_layout():
+        edge = abs(lateral) - width / 2  # leg frame: the leg runs along +x from 0 to `length`
+        assert guard < edge <= 1.0 - 0.04  # inside the C4 danger range, outside the footprint guard
+        # never inside a turn's rotation circle (start and far end)
+        assert math.hypot(along, lateral) - width / 2 > ROTATION_RADIUS
+        assert math.hypot(length - along, lateral) - width / 2 > ROTATION_RADIUS
+        assert np.isclose(polyline_distance(np.array([[0, 0], [length, 0]]), [[along, lateral]])[0], abs(lateral))
+    heights = sorted(h for _, h, _ in approach_layout())
+    assert heights == [0.12, 0.20, 0.30, 0.40]
+    assert validate_profile(APPROACH_PROFILE, "approach_field") == APPROACH_PROFILE
+    for name, pattern in ((APPROACH_PROFILE, "loop16"), ("", "approach_field"), (APPROACH_PROFILE, "turn15")):
+        with pytest.raises(ValueError, match="declared together"):
+            validate_profile(name, pattern)

@@ -22,7 +22,8 @@ from build_local_terrain import validate_build
 from export_shadow_trajectory import revision_record, stamp_ns
 from local_terrain.core import LocalConfig, LocalReconstructor
 from local_terrain.costmap import inflate, map_from_grid
-from local_terrain.navigation_cost import GapPolicy, navigation_costs
+from local_terrain.nav2_contract import DEFAULT_CONFIG as NAV2_CONFIG, Footprint, Nav2Config, planner_costs
+from local_terrain.navigation_cost import PUBLISHED_POLICIES
 from local_terrain.rolling_mapper import RollingTerrainMapper
 from local_terrain.self_filter import chassis_returns
 from native_chunk_transport import decode
@@ -63,7 +64,17 @@ def main():
             if request["lidar_profile"]["name"] != "selected_optical_v2":
                 raise ValueError("live v2 requires optical-origin corrected sensing")
             self.request = request
-            self.isolated_gap_costs = parameter("isolated_gap_costs", False)
+            # planner_costmap: "" (not published), "isolated" (the legacy isolated_gap_costs
+            # experiment) or "nav2_bounded_shadow" (the C1-gated Nav2 input). Every policy
+            # publishes with the rover's own unpadded footprint cleared (nav2_contract).
+            legacy = "isolated" if parameter("isolated_gap_costs", False) else ""
+            self.planner_policy_name = parameter("planner_gap_policy", "") or legacy
+            if self.planner_policy_name not in ("", *PUBLISHED_POLICIES) or legacy and self.planner_policy_name != legacy:
+                raise ValueError("undeclared or conflicting planner gap policy")
+            self.planner_policy = PUBLISHED_POLICIES.get(self.planner_policy_name)
+            self.isolated_gap_costs = self.planner_policy is not None
+            nav2_config = Nav2Config.from_yaml()
+            self.planner_footprint = Footprint((60, 60), (0.0, 0.0), 0.1, nav2_config)
             self.setup, _ = selected_setup(profile_path(request["lidar_profile"]["name"]))
             config = LocalConfig(
                 window_s=5,
@@ -90,6 +101,7 @@ def main():
                 Path(__file__).resolve(),
                 request_path,
                 profile_path(request["lidar_profile"]["name"]),
+                NAV2_CONFIG,  # planner footprint (Nav2Config.from_yaml)
                 *sorted((directory / "local_terrain").glob("*.py")),
                 *[
                     directory / name
@@ -118,7 +130,9 @@ def main():
                 input_sha256=self.hashes,
                 request=request,
                 inflation_radius_m=1.0,
-                isolated_gap_costs=asdict(GapPolicy()) if self.isolated_gap_costs else None,
+                isolated_gap_costs=asdict(self.planner_policy) if self.isolated_gap_costs else None,
+                planner_gap_policy=self.planner_policy_name or None,
+                planner_footprint_cleared=asdict(nav2_config) if self.isolated_gap_costs else None,
                 navigation_authority=False,
                 acceptance=False,
                 output_frame="map",
@@ -272,7 +286,8 @@ def main():
                 if layers is None:
                     planner_cost, uncertainty = classes.copy(), classes.copy()
                 else:
-                    planner_cost, mask = navigation_costs(layers)
+                    planner_cost, mask = planner_costs(layers, self.core.last_record, self.planner_policy,
+                                                       self.planner_footprint)
                     uncertainty = mask.astype(np.int8) * 100
                 outputs.extend([(self.planner_cost_pub, planner_cost), (self.uncertainty_pub, uncertainty)])
             for publisher, values in outputs:

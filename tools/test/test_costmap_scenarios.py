@@ -32,6 +32,16 @@ def test_recorder_total_budget_matches_declared_route_without_changing_legacy():
         assert recorder_wall_maximum(pattern, "default", budget) == (3600 if pattern in SCENARIOS else 1800)
 
 
+def test_waypoint_loops_declare_recorder_sized_quota_and_their_own_wall_budget():
+    from costmap_scenarios import archive_limit, recorder_wall_maximum
+    from natural_motion import WAYPOINTS, execution_budget
+
+    assert archive_limit("transit50") == 40 * 1024**3
+    assert archive_limit("approach_field") == 12 * 1024**3
+    for pattern in WAYPOINTS:
+        assert recorder_wall_maximum(pattern, "default", execution_budget(pattern)) == route(pattern)["max_wall_s"]
+
+
 def scene(stamp, xy, yaw=0, rock=False):
     a = advisory(stamp, *xy)
     c, s = math.cos(yaw), math.sin(yaw)
@@ -305,6 +315,7 @@ def test_obstacle_survey_does_not_disable_command_time_first_hit_veto(monkeypatc
     driver.spec = route("costmap_detour8")
     driver.points, driver.shape = survey_points(np.eye(4), "costmap_detour8")
     driver.survey_lookup = SurveyLookup(driver.points)
+    driver.mask, driver.lookup_index = None, np.arange(len(driver.points))
     driver.heights = np.zeros(len(driver.points))
     driver.normals = np.tile([0, 0, 1], (len(driver.points), 1))
     driver.cast = lambda *args: [

@@ -21,12 +21,21 @@ def profile_path(name=None):
     return PROFILES[name]
 
 
+# Declared waypoint loops (natural_motion.WAYPOINTS) with their own storage/evaluation
+# bounds: transit50 ~430 sim-s, approach_field ~150 sim-s, both with ample headroom.
+WAYPOINT_LIMITS = {"transit50": dict(max_duration_s=900, max_native_frames=55000),
+                   "approach_field": dict(max_duration_s=480, max_native_frames=29000)}
+EXTENDED_PATTERNS = ("loop16", "turn360", *SCENARIOS, *WAYPOINT_LIMITS)
+
+
 def acquisition_limits(pattern):
     from natural_motion import route
 
     route(pattern)  # No arbitrary duration extension through an unknown route.
     if pattern in SCENARIOS:
         return dict(max_duration_s=620, max_native_frames=38000)
+    if pattern in WAYPOINT_LIMITS:
+        return dict(WAYPOINT_LIMITS[pattern])
     if pattern == "turn360":
         # Ten independently bounded 40 s legs plus settling/pre/postroll.
         # Explicit new observation dose, not an extension of any old route.
@@ -56,7 +65,7 @@ def validate_request(request):
     profile = request.get("lidar_profile", {}).get("name", "invalid")
     if request.get("lidar_profile") != declaration(profile) or request.get("pitch_deg") != 0.0:
         raise ValueError("selected LiDAR protocol differs from frozen geometry/timing")
-    if request.get("pattern") in ("loop16", "turn360", *SCENARIOS) and request.get("acquisition_limits") != acquisition_limits(request["pattern"]):
+    if request.get("pattern") in EXTENDED_PATTERNS and request.get("acquisition_limits") != acquisition_limits(request["pattern"]):
         raise ValueError("selected loop requires declared extended acquisition bounds")
     setup, _ = selected_setup(profile_path(profile))
     expected = np.eye(4)

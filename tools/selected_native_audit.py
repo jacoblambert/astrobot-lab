@@ -148,12 +148,12 @@ def audit_transport(capture, recorder):
 
 
 def validate_native(audit, *, motion="straight_slow", profile="selected_generic_v1"):
-    from selected_lidar_profile import PROFILES, acquisition_limits
+    from selected_lidar_profile import EXTENDED_PATTERNS, PROFILES, acquisition_limits
     from costmap_scenarios import SCENARIOS
 
     limits = acquisition_limits(motion)
     if (
-        motion in ("loop16", "turn360", *SCENARIOS)
+        motion in EXTENDED_PATTERNS
         and audit.get("acquisition_limits") != limits
         or "acquisition_limits" in audit
         and audit["acquisition_limits"] != limits

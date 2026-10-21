@@ -23,6 +23,7 @@ def generate_launch_description():
                                "request_json": LaunchConfiguration("terrain_request_json"),
                                "contact_advisory": ParameterValue(LaunchConfiguration("contact_advisory"), value_type=bool),
                                "isolated_gap_costs": ParameterValue(LaunchConfiguration("isolated_gap_costs"), value_type=bool),
+                               "planner_gap_policy": LaunchConfiguration("planner_gap_policy"),
                                "contact_deployment_confirmed": ParameterValue(LaunchConfiguration("contact_deployment_confirmed"), value_type=bool),
                                "contact_support_core": ParameterValue(LaunchConfiguration("contact_support_core"), value_type=bool),
                                "contact_startup_turn_area": ParameterValue(LaunchConfiguration("contact_startup_turn_area"), value_type=bool),
@@ -39,6 +40,8 @@ def generate_launch_description():
         DeclareLaunchArgument("terrain_request_json", default_value=""),
         DeclareLaunchArgument("contact_advisory", default_value="false"),
         DeclareLaunchArgument("isolated_gap_costs", default_value="false"),
+        DeclareLaunchArgument("planner_gap_policy", default_value="",
+                              description="'' | isolated | nav2_bounded_shadow (navigation_cost.PUBLISHED_POLICIES)"),
         DeclareLaunchArgument("contact_deployment_confirmed", default_value="false"),
         DeclareLaunchArgument("contact_support_core", default_value="false"),
         DeclareLaunchArgument("contact_startup_turn_area", default_value="false"),
@@ -63,5 +66,5 @@ def generate_launch_description():
                           # Measured settled USD/TF joint origin; not a fitted
                           # trajectory alignment (see audit_shadow_inputs.py).
                           "antenna_offset_xyz": [0.26399862939321395, 0.017279625659938347, 0.2624700776230195],
-                          "sigma0": 0.05, "sigma_per_m": 0.01, "dropout_prob": 0.0, "latency_s": 0.0}]),
+                          "sigma0": 0.02, "sigma_per_m": 0.001, "dropout_prob": 0.0, "latency_s": 0.0}]),
     ])

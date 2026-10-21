@@ -1,0 +1,17 @@
+# C1/C2 at Nav2 speed: transit50 (2026-10-21), 50.5 m loop at 0.18 m/s on seed-43 natural rocks,
+# crossing itself once. Capture 91cbf324, recorder ed0eb26e, live terrain 215e1aaf.
+[suite]
+name = "transit50"
+every = 1
+
+[[jobs]]
+sources = ["revision-215e1aaf"]
+profiles = [
+  "slam",
+  "gt",
+  "gt+h15,z1,y1,r0.35",      # C2 gate
+  "gt+h20,z1,y0.3,r0.2",     # horizontal knee
+  "gt+h15,z2,y0.3,r0.2",     # z knee
+  "gt+h15,z1,y0.3,r0.6",     # tilt knee
+  "gt+h15,z1.4,y0.35,r0.6",  # combined stress
+]

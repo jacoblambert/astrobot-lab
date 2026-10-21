@@ -16,7 +16,8 @@ not literal GPS satellites.
 ```
 
 - **`synthetic_rtk`** (this package): the *sim* RTK source. Subscribes `/gt/base_link_pose`, applies an
-  antenna lever-arm, baseline-scaled noise `σ(d)=σ0+k·d`, optional dropout/latency, and publishes
+  antenna lever-arm, baseline-scaled noise `σ(d)=σ0+k·d` (default 0.02 + 0.001·d m, z ×2; was
+  0.05 + 0.01·d before 2026-10-20, ~0.6 m at the 55 m lunaryard baseline), optional dropout/latency, and publishes
   `/rtk/pose` (`PoseWithCovarianceStamped`, **home-relative world frame**, position + heading with
   covariance). Republishes at **30 Hz with current-time stamps**. Publishes a measurement topic only —
   **never a TF**. *On real hardware, replace this node with the real RTK/beacon driver publishing the
@@ -37,7 +38,7 @@ RTK outweighs the scan match. The relative weight is set by the noise models, un
 
 | factor | σ | information (Precision) |
 |---|---|---|
-| RTK position | ≈0.05 m (near home) | ≈ **400** |
+| RTK position | ≈0.05 m (`sigma_floor`; the message σ is lower) | ≈ **400** |
 | scan-match prior | hardcoded `Isotropic::Precision(6, 1e3)` | **1000** |
 
 So **per frame the scan prior is ~2.5× stronger than RTK** — RTK does not dominate locally. RTK bounds

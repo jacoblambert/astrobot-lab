@@ -1,0 +1,24 @@
+# C3 on the transit50 recorder: 50.5 m at 0.18 m/s (Nav2 vx_max), captured at the synthetic_rtk
+# default noise (sigma = 0.02 + 0.001 d), so no rescale. Same profiles and checks as c3.toml.
+[suite]
+name = "c3_transit"
+checks = "checks_c3.toml"
+
+[rtk]
+recorder = "revision-ed0eb26e"          # transit50 recorder (capture 91cbf324, Oct 21)
+terrain_manifest = "revision-215e1aaf"  # same drive's live terrain run
+rate = 2
+parallel = 4
+domain0 = 182
+rtk_sigma = [0.02, 0.001]  # recorded at this level: the base builder's rescale is the identity
+bases = { sup = "revision-a700e4be", bare = "revision-d1fd9cde" }  # built Oct 21 (run 8ddc7c18); drop to rebuild
+
+[[rtk.jobs]]
+supervised = true
+rate = 1
+profiles = ["nominal", "noise5", "outage5", "outage15", "outage30", "outage60", "outlier0.3", "outlier1"]
+
+[[rtk.jobs]]
+supervised = false
+rate = 1  # at rate 2 GLIM fell 53-60 s behind on this 50 m drive (run 8ddc7c18): invalid
+profiles = ["nominal", "outage30", "outage120", "outlier1"]

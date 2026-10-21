@@ -10,6 +10,10 @@ SCENARIOS = {
 COSTMAP_PATTERNS = ("costmap1", "costmap2", *SCENARIOS)
 TRIAL_PATTERNS = ("terrain_step", *COSTMAP_PATTERNS)
 PROTOCOL = "costmap_route_trial_v13"
+# natural_motion.WAYPOINTS run quotas. The capture, its recorder and the live terrain run each
+# allocate this. loop16 (317 sim-s) used 3.2 / 17 / 10.4 GB; transit50 is ~430 sim-s and
+# approach_field ~165 sim-s (attempt 569ba2de wrote 5.7 / 1.5 / 3.7 GB in 157 s).
+WAYPOINT_ARCHIVE_GIB = {"transit50": 40, "approach_field": 12}
 
 
 def scenario_spec(pattern):
@@ -55,11 +59,15 @@ def archive_limit(pattern, profile="default"):
         if pattern != "turn45":
             raise ValueError("bounded turn storage profile requires turn45")
         return 16 * 1024**3
+    if pattern in WAYPOINT_ARCHIVE_GIB:
+        return WAYPOINT_ARCHIVE_GIB[pattern] * 1024**3
     return (32 if pattern in SCENARIOS or profile == "turn15_gc_stress_v1" else 64) * 1024**3
 
 
 def recorder_wall_maximum(pattern, profile, budget):
-    return budget["max_wall_s"] if pattern in SCENARIOS or profile != "default" else 1800
+    if pattern in SCENARIOS or pattern in WAYPOINT_ARCHIVE_GIB or profile != "default":
+        return budget["max_wall_s"]
+    return 1800
 
 
 def check_position(origin, current, bounds):

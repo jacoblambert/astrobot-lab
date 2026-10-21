@@ -41,7 +41,7 @@ ros2 run synthetic_rtk synthetic_rtk --ros-args \
   -p gt_topic:=/gt/base_link_pose -p output_topic:=/rtk/pose \
   -p world_frame:=map -p home_xy:="[20.0, 18.0]" \
   -p antenna_offset_xyz:="[0.264, 0.017, 0.262]" \
-  -p sigma0:=0.05 -p sigma_per_m:=0.01 -p dropout_prob:=0.0 -p latency_s:=0.0 \
+  -p sigma0:=0.02 -p sigma_per_m:=0.001 -p dropout_prob:=0.0 -p latency_s:=0.0 \
   > "$OUT/synthetic_rtk.log" 2>&1 &
 RTK_PID=$!
 

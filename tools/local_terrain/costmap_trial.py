@@ -84,6 +84,25 @@ class CircularClearance:
         line = Point(start) if np.array_equal(start, end) else LineString([start, end])
         return all(not np.any(distance(line, cells) <= radius + 1e-10) for cells, radius in self.groups)
 
+    def permits(self, start, end):
+        """Clear, or an escape that never comes closer to any conflict than the start already is.
+
+        The radii are circles about the rover centre, so an in-place rotation (start == end)
+        never reduces clearance and is permitted even with a conflict already inside a radius.
+        Accepted risk (user decision 2026-10-20): a skid turn can still translate the rover by
+        the command drift allowance; the driver's drift and turn-translation limits bound it.
+        """
+        from shapely import distance, LineString, Point
+
+        if self(start, end):
+            return True
+        line = Point(start) if np.array_equal(start, end) else LineString([start, end])
+        here = Point(start)
+        return all(
+            not len(cells) or float(np.min(distance(line, cells))) >= float(np.min(distance(here, cells))) - 1e-10
+            for cells, _ in self.groups
+        )
+
 
 def routing_grid(
     layers,
@@ -450,7 +469,7 @@ class CostmapTrial:
                     )
                 )
                 if self.spec and checked["state"] == "available":
-                    if not clearance(current[:2, 3], (current @ relative[-1])[:2, 3]):
+                    if not clearance.permits(current[:2, 3], (current @ relative[-1])[:2, 3]):
                         return dict(state="blocked", reason="would_lose_turning_clearance")
                 return checked
 

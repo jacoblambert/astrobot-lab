@@ -166,8 +166,10 @@ def test_live_first_output_requires_measurement_time_stationary_window_and_frame
 def test_routes_are_bounded_and_full_survey_contains_turn_envelope(pattern):
     spec = route(pattern)
     from costmap_scenarios import SCENARIOS
-    assert spec["speed"] <= .15 and spec["angular_speed"] == .1
-    assert tuple(spec["targets"][-1]) == ((0., 0., 0., "rotate") if pattern == "loop16" else (0., 0.))
+    from natural_motion import WAYPOINT_LOOPS
+    # transit50 runs at Nav2's MPPI vx_max (0.18), the declared speed-realistic route.
+    assert spec["speed"] <= (.18 if pattern == "transit50" else .15) and spec["angular_speed"] == .1
+    assert tuple(spec["targets"][-1]) == ((0., 0., 0., "rotate") if pattern in WAYPOINT_LOOPS else (0., 0.))
     points, shape = survey_points(np.eye(4), pattern)
     assert len(points) == math.prod(shape)
     assert np.all(points.min(axis=0) <= (-.9 if pattern == "straight_slow" else -1.35))

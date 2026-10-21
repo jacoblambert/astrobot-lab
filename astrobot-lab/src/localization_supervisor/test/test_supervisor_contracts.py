@@ -222,3 +222,84 @@ def test_shadow_rejects_navigation_action_activity(supervisor):
     assert supervisor.state == Status.FAULTED
     assert supervisor.reason == "navigation_active_in_shadow_mode"
     supervisor._launch_child.assert_not_called()
+
+
+def fix(t, x=0., y=0., z=0., sigma=.075):
+    from geometry_msgs.msg import PoseWithCovarianceStamped
+
+    msg = PoseWithCovarianceStamped()
+    msg.header.stamp.sec, msg.header.stamp.nanosec = int(t), int(round((t % 1) * 1e9))
+    msg.header.frame_id = "map"
+    msg.pose.pose.position.x, msg.pose.pose.position.y, msg.pose.pose.position.z = float(x), float(y), float(z)
+    msg.pose.pose.orientation.w = 1.0
+    cov = [0.0] * 36
+    cov[0] = cov[7] = sigma**2
+    cov[14] = (2 * sigma) ** 2  # synthetic_rtk sigma_z_scale
+    cov[21] = cov[28] = 1e6
+    cov[35] = 1e-4
+    msg.pose.covariance = cov
+    return msg
+
+
+def feed(node, t, msg):
+    node.now_sec = lambda: t
+    node._fix(msg)
+
+
+def test_vertical_variance_does_not_widen_the_horizontal_jump_gate(supervisor):
+    # sigma 7.5 cm (55 m from home): a 1 m horizontal jump between consecutive fixes is
+    # ~9 per-axis sigma. The old 3-D trace gate (z sigma 2x) admitted it (1.67 m).
+    feed(supervisor, 9.6, fix(9.6))
+    feed(supervisor, 9.633, fix(9.633, x=1.0))
+    assert len(supervisor.fixes) == 1
+    feed(supervisor, 9.666, fix(9.666, x=.1, z=.3))  # plausible noise + motion: accepted
+    assert len(supervisor.fixes) == 2
+
+
+def test_persistent_outlier_stays_rejected_while_glim_covers_the_interval(supervisor):
+    for k in range(21):
+        supervisor.recent_poses.append((9.0 + k * .05, (0., 0., 0.)))  # stationary GLIM
+    feed(supervisor, 9.5, fix(9.5))
+    for t in (9.55, 9.7, 9.85, 9.95):  # the speed bound alone would admit 9.95 / 10.1+
+        feed(supervisor, t, fix(t, x=1.0))
+    assert [f.pose.pose.position.x for f in supervisor.fixes] == [0.]
+
+
+def test_one_noisy_outlier_fix_cannot_capture_the_gate(supervisor):
+    # Fix-to-fix gating chains: once one burst fix slips in, the rest follow it. Against
+    # GLIM, every later burst fix is still 1 m from the estimate.
+    for k in range(21):
+        supervisor.recent_poses.append((9.0 + k * .05, (0., 0., 0.)))
+    feed(supervisor, 9.5, fix(9.5, x=.5))  # burst fix pulled back by noise: inside 0.55 m
+    for t in (9.55, 9.6, 9.65):
+        feed(supervisor, t, fix(t, x=1.0))
+    assert [f.pose.pose.position.x for f in supervisor.fixes] == [.5]
+
+
+def test_real_motion_follows_glim_displacement_across_a_gap(supervisor):
+    for k in range(21):
+        supervisor.recent_poses.append((9.0 + k * .05, (.5 * k * .05, 0., 0.)))  # 0.5 m/s
+    feed(supervisor, 9.2, fix(9.2, x=.1))
+    feed(supervisor, 9.95, fix(9.95, x=.475))  # 0.75 s gap, moved with GLIM
+    assert len(supervisor.fixes) == 2
+    (x, _, _), uncovered = supervisor._estimated_position(9.95)
+    assert abs(x - .475) < 1e-9 and uncovered == 0.
+    assert supervisor._estimated_position(10.6) is None  # GLIM silent > 0.5 s: speed bound instead
+
+
+@pytest.mark.parametrize("x,z,faults", [(.6, 0., True), (0., .6, False)])
+def test_disagreement_fault_is_per_axis(supervisor, x, z, faults):
+    # sigma 7.5 cm: horizontal limit max(0.5, 0.45) = 0.5 m, vertical max(0.5, 6 * 0.15) = 0.9 m
+    node = supervisor
+    node.state = Status.HEALTHY
+    feed(node, 10.0, fix(10.0))
+    node._pose(_pose_at(10.0, x=x, z=z))
+    assert (node.reason == "absolute_position_disagreement") is faults
+    assert (node.state == Status.STOPPING) is faults
+
+
+def _pose_at(t, x=0., z=0.):
+    msg = pose(x=x)
+    msg.header.stamp.sec, msg.header.stamp.nanosec = int(t), int(round((t % 1) * 1e9))
+    msg.pose.position.z = float(z)
+    return msg

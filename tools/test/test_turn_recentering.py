@@ -161,7 +161,13 @@ def test_estimated_excessive_turn_translation_stops_without_recentering():
     assert value["turn_origin_xy"] == first["turn_origin_xy"]
 
 
-def test_rock_in_additional_slip_envelope_still_vetoes_turn():
+def test_rock_in_additional_slip_envelope_permits_rotation_but_not_approach():
+    """User decision 2026-10-20: accept skid-drift risk over turn deadlock.
+
+    A rock inside the slip-envelope circle (but outside the body circle) no longer
+    vetoes an in-place rotation, which cannot reduce circular clearance; translating
+    toward it still does. The driver's drift allowance bounds the skid.
+    """
     from local_terrain.costmap_trial import CircularClearance
 
     controller, _ = turning_trial()
@@ -170,5 +176,7 @@ def test_rock_in_additional_slip_envelope_still_vetoes_turn():
     a.layers[30, 41, :2] = [100, 3]  # Near edge x=1.13 m: old 1.101 m circle clears.
     assert CircularClearance(a.layers, a.record, math.hypot(0.85, 0.70), 0.46)([0, 0], [0, 0])
     value = controller.update(a, a.context.query_ns)
-    assert value["linear"] == value["angular"] == 0
-    assert value["decision"]["state"] == "blocked"
+    assert value["linear"] == 0 and value["angular"] == -0.1
+    envelope = CircularClearance(a.layers, a.record, 1.2, 0.46)
+    assert not envelope([0, 0], [0, 0]) and envelope.permits([0, 0], [0, 0])
+    assert envelope.permits([0, 0], [-0.2, 0]) and not envelope.permits([0, 0], [0.1, 0])

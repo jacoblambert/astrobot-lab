@@ -51,7 +51,7 @@ def test_extended_archive_capacity_is_explicit_and_still_bounded():
     records.records = ["{}"] * 40000
     with pytest.raises(ValueError, match="capacity"):
         records.append({})
-    for capacity in (0, 40001, 1.5):
+    for capacity in (0, 100001, 1.5):
         with pytest.raises(ValueError, match="capacity"):
             module.EncodedFrames(capacity=capacity)
 

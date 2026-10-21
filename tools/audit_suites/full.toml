@@ -1,0 +1,38 @@
+# Every archived live_local_v2 capture with GT geometry, every projection. Rebuilt Oct 21: the
+# Oct 20 archive cleanup removed the native captures of every Oct 19 source (3ac40f8a,
+# 236b00c7, 0113a562, b47a9b95, f3b5f4d7, c0e8e509); square8 and turn360/turn15 are not yet
+# recaptured.
+#   833118eb  costmap_detour8 (0.4 m demo rock), capture 7ecd0ac9
+#   91e21355  loop16 (pairs with C3 recorder 2623e294), capture 1c242f80
+#   215e1aaf  transit50 (50.5 m at 0.18 m/s), capture 91cbf324
+#   507b46e8  approach_field (0.12-0.40 m demo rocks inside the 1 m danger range), capture 2379e8d0
+[suite]
+name = "full"
+every = 1
+
+[[jobs]]
+sources = ["revision-833118eb", "revision-91e21355", "revision-215e1aaf", "revision-507b46e8"]
+profiles = [
+  "slam",
+  "gt",
+  "gt+h15,z1,y1,r0.35",      # C2 gate
+  "gt+h20,z1,y0.3,r0.2",     # horizontal knee
+  "gt+h15,z2,y0.3,r0.2",     # z knee
+  "gt+h15,z1,y0.3,r0.6",     # tilt knee
+  "gt+h15,z1.4,y0.35,r0.6",  # combined stress
+]
+
+# Real GLIM error from the C3 suite (run 1ec29770, 2026-10-21) fed into the same drive's terrain.
+# sup = navigation-mode supervisor (RTK + gravity init, no GT seed). Poses inside a supervisor
+# hold are interpolated across the GLIM restart gap; the live map would be cleared there.
+[[jobs]]
+sources = ["revision-91e21355"]
+profiles = [
+  "glim:revision-4a2d1598",  # bare nominal (should match "slam")
+  "glim:revision-ed839e18",  # bare outage120
+  "glim:revision-661affc3",  # sup nominal
+  "glim:revision-57679fe0",  # sup outlier0.3: below the gate, 27.7 cm published while permitted
+  # Supervised runs that restart GLIM are left out (outage*, and outlier1 on this recorder:
+  # e335906b, 2 epochs, 44.8 % phantom in run d9b3afff). The restart re-initializes from RTK
+  # (new z/xy offset) and the replay interpolates across the gap without the map reset.
+]

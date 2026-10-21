@@ -2,17 +2,17 @@
 # Recorder-first opt-in acquisition. Does not start navigation or replace a world.
 set -eo pipefail
 if (( $# > 2 )); then
-  echo 'Usage: bash docker/run_selected_headless.sh [preflight|start] [loop16|turn15|turn360|peek_reverse|peek_reverse20|straight_slow|combined10|terrain_step]' >&2
+  echo 'Usage: bash docker/run_selected_headless.sh [preflight|start] [loop16|turn15|turn360|peek_reverse|peek_reverse20|straight_slow|combined10|terrain_step|transit50|approach_field]' >&2
   exit 2
 fi
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 mode="${1:-preflight}"
 route="${2:-loop16}"
 if [[ "$mode" != preflight && "$mode" != start ]]; then
-  echo 'Usage: bash docker/run_selected_headless.sh [preflight|start] [loop16|turn15|turn360|peek_reverse|peek_reverse20|straight_slow|combined10|terrain_step]' >&2
+  echo 'Usage: bash docker/run_selected_headless.sh [preflight|start] [loop16|turn15|turn360|peek_reverse|peek_reverse20|straight_slow|combined10|terrain_step|transit50|approach_field]' >&2
   exit 2
 fi
-if [[ "$route" != loop16 && "$route" != turn15 && "$route" != turn45 && "$route" != turn360 && "$route" != peek_reverse && "$route" != peek_reverse20 && "$route" != straight_slow && "$route" != combined10 && "$route" != terrain_step && "$route" != costmap1 && "$route" != costmap2 && "$route" != costmap_return4 && "$route" != costmap_square8 && "$route" != costmap_detour8 ]]; then
+if [[ "$route" != loop16 && "$route" != turn15 && "$route" != turn45 && "$route" != turn360 && "$route" != peek_reverse && "$route" != peek_reverse20 && "$route" != straight_slow && "$route" != combined10 && "$route" != terrain_step && "$route" != costmap1 && "$route" != costmap2 && "$route" != costmap_return4 && "$route" != costmap_square8 && "$route" != costmap_detour8 && "$route" != transit50 && "$route" != approach_field ]]; then
   echo 'Only declared inspection routes are supported.' >&2
   exit 2
 fi

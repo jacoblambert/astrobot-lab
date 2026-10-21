@@ -1,0 +1,30 @@
+# C3: GLIM + RTK on the loop16 recorder, in the dev container (docker exec).
+# Recaptured Oct 21 (capture 1c242f80) after the Oct 20 archive cleanup removed recorder
+# d4d0f081; recorded at the synthetic_rtk default noise (sigma = 0.02 + 0.001 d), so the
+# rtk_sigma rescale is the identity. Supervised jobs run at rate 1: at rate 2 GLIM's wall-time
+# latency trips the supervisor's sim-time pose_stale fault. Bare jobs too, since Oct 21: rate 2
+# was validated on the old loop16 recorder but lags GLIM on the new captures.
+# "sup" = navigation-mode supervisor owns GLIM and /rtk/pose is edited; "bare" = GLIM only,
+# edited supervisor-output stream (no RTK gate).
+[suite]
+name = "c3"
+checks = "checks_c3.toml"
+
+[rtk]
+recorder = "revision-2623e294"          # loop16 recorder (Oct 21)
+terrain_manifest = "revision-91e21355"  # same drive's terrain: base_from_imu, home_xyz
+rate = 2
+parallel = 4
+domain0 = 182
+rtk_sigma = [0.02, 0.001]               # sigma(d) = 0.02 + 0.001 d
+bases = { sup = "revision-3d241853", bare = "revision-c4579ff4" }  # built Oct 21 (run e9eb1014); drop to rebuild
+
+[[rtk.jobs]]
+supervised = true
+rate = 1  # supervisor staleness limits are sim-time; GLIM latency is wall time
+profiles = ["nominal", "noise5", "outage5", "outage15", "outage30", "outage60", "outlier0.3", "outlier1"]
+
+[[rtk.jobs]]
+supervised = false
+rate = 1  # rate 2 lagged 8-20 s on this recorder (run e9eb1014) and 53-60 s on transit50
+profiles = ["nominal", "outage30", "outage120", "outlier1"]

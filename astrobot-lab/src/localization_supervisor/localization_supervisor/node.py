@@ -31,6 +31,21 @@ def stamp(msg):
     return msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
 
+# Absolute-fix gates (2026-10-20). Per axis, never one 3-D trace sigma: RTK's vertical
+# variance (2x horizontal sigma) must not widen the horizontal gate. While GLIM runs, each
+# fix is gated against GLIM's own position at the fix stamp (innovation), so an outlier
+# burst cannot capture the reference the way a chain of fix-to-fix comparisons can (C3
+# outlier1: one noisy fix inside the gate, then the whole 1 m burst). Without GLIM: fix to
+# last accepted fix with a speed bound (the old 2 m/s * dt let a 1 m burst in after 0.5 s).
+GATE_SIGMA = 6.  # per-axis sigma; a 2-D 6-sigma radius has p = exp(-18)
+MAX_SPEED = .5  # m/s, rover motion bound over intervals GLIM does not cover
+GLIM_ALLOWANCE = .1  # m, GLIM's own error against truth (C3 nominal max ~10 cm)
+
+
+def horizontal_vertical_sigma(c):
+    return math.sqrt((c[0]+c[7])/2), math.sqrt(c[14])
+
+
 class LocalizationSupervisor(Node):
     def __init__(self):
         super().__init__("localization_supervisor")
@@ -49,6 +64,7 @@ class LocalizationSupervisor(Node):
         self.fixes, self.imu = deque(maxlen=100), deque(maxlen=200)
         self.odom = None
         self.last_pose = None
+        self.recent_poses = deque(maxlen=100)
         self.accepted_stamps = deque(maxlen=100)
         self.pending_clouds, self.pending_lidar = deque(maxlen=5), deque(maxlen=100)
         self.last_sim = 0.0
@@ -105,17 +121,37 @@ class LocalizationSupervisor(Node):
             return
         if abs(q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w-1) > .02 or not -.05 <= self.now_sec()-stamp(msg) <= .5:
             return
-        if self.fixes:
+        if self.fixes and stamp(msg) <= stamp(self.fixes[-1]):
+            return
+        expected = self._estimated_position(stamp(msg))
+        reference = None
+        if expected is not None:
+            reference, uncovered = expected
+            allowance, cov = GLIM_ALLOWANCE + MAX_SPEED*uncovered, c
+        elif self.fixes:
             last = self.fixes[-1]
-            dt = stamp(msg)-stamp(last)
-            if dt <= 0:
-                return
             old = last.pose.pose.position
-            sigma = math.sqrt(sum(c[i]+last.pose.covariance[i] for i in (0,7,14)))
-            if math.dist((p.x,p.y,p.z),(old.x,old.y,old.z)) > 2*dt + .05 + 6*sigma:
+            reference = (old.x, old.y, old.z)
+            allowance = .05 + MAX_SPEED*(stamp(msg)-stamp(last))
+            cov = [c[i]+last.pose.covariance[i] for i in range(15)]
+        if reference is not None:
+            sh, sz = horizontal_vertical_sigma(cov)
+            if (math.hypot(p.x-reference[0], p.y-reference[1]) > allowance + GATE_SIGMA*sh
+                    or abs(p.z-reference[2]) > allowance + GATE_SIGMA*sz):
                 return
         self.fixes.append(msg)
         self.fix_pub.publish(msg)
+
+    def _estimated_position(self, t):
+        """GLIM position at stamp t (held at the nearest end) and the seconds it is held; None if unusable."""
+        if not self.recent_poses:
+            return None
+        times = [s for s, _ in self.recent_poses]
+        uncovered = max(0., times[0]-t, t-times[-1])
+        if uncovered > .5:
+            return None
+        xyz = np.array([v for _, v in self.recent_poses])
+        return tuple(float(np.interp(t, times, xyz[:, i])) for i in range(3)), uncovered
 
     def _fault(self, reason, terminal=False):
         terminal = terminal or self.shadow_mode
@@ -136,6 +172,7 @@ class LocalizationSupervisor(Node):
         self.clear_futures = None
         self.map_ready, self.map_stamp = False, None
         self.last_pose = None
+        self.recent_poses.clear()
         self.accepted_stamps.clear()
         self.pending_clouds.clear()
         self.pending_lidar.clear()
@@ -174,11 +211,13 @@ class LocalizationSupervisor(Node):
         if self.fixes and abs(stamp(self.fixes[-1])-stamp(msg)) < .1:
             fix = self.fixes[-1]
             fp = fix.pose.pose.position
-            sigma = math.sqrt(sum(fix.pose.covariance[i] for i in (0,7,14)))
-            if math.dist((p.x,p.y,p.z),(fp.x,fp.y,fp.z)) > max(.5,6*sigma):
+            sh, sz = horizontal_vertical_sigma(fix.pose.covariance)
+            if (math.hypot(p.x-fp.x, p.y-fp.y) > max(.5, GATE_SIGMA*sh)
+                    or abs(p.z-fp.z) > max(.5, GATE_SIGMA*sz)):
                 self._fault("absolute_position_disagreement")
                 return
         self.last_pose = msg
+        self.recent_poses.append((stamp(msg), (p.x, p.y, p.z)))
         self.accepted_stamps.append((msg.header.stamp.sec,msg.header.stamp.nanosec))
         self.pose_pub.publish(msg)
         if self.healthy_since is None:

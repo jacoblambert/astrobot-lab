@@ -5,7 +5,7 @@ import sys
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from shadow_capture_gate import ShadowLease, validate_shadow_geometry
+from shadow_capture_gate import HEARTBEAT_S as H, ShadowLease, validate_shadow_geometry
 
 CAPTURE = "revision-" + "a" * 32
 
@@ -29,11 +29,11 @@ def test_unarmed_stale_latched_message_and_fresh_grant():
 def test_duplicate_does_not_refresh_wall_lease():
     lease = ShadowLease(CAPTURE)
     lease.receive(grant(), 10., 100.)
-    assert not lease.receive(grant(), 10.4, 100.4)
+    assert not lease.receive(grant(), 10 + .8*H, 100 + .8*H)
     with pytest.raises(ValueError, match="expired"):
-        lease.ready(10.4, 100.6)
+        lease.ready(10 + .8*H, 100 + 1.2*H)
     with pytest.raises(ValueError):
-        lease.receive(grant(sequence=2, stamp=10.4), 10.4, 100.6)
+        lease.receive(grant(sequence=2, stamp=10 + .8*H), 10 + .8*H, 100 + 1.2*H)
 
 
 @pytest.mark.parametrize("changes", [dict(ready=False), dict(epoch=2), dict(session="new"),
@@ -49,7 +49,7 @@ def test_faults_cannot_rearm(changes):
         lease.ready(10.1, 100.1)
 
 
-@pytest.mark.parametrize("sim,wall", [(10.6, 100.1), (10.1, 100.6), (9., 100.1), (10.1, 99.)])
+@pytest.mark.parametrize("sim,wall", [(10.1 + H, 100.1), (10.1, 100.1 + H), (9., 100.1), (10.1, 99.)])
 def test_independent_clock_expiry_and_reversal(sim, wall):
     lease = ShadowLease(CAPTURE)
     lease.receive(grant(), 10., 100.)
@@ -69,7 +69,7 @@ def test_late_fresh_grant_cannot_revive_lease_without_prior_poll():
     lease = ShadowLease(CAPTURE)
     lease.receive(grant(), 10., 100.)
     with pytest.raises(ValueError, match="expired"):
-        lease.receive(grant(sequence=2, stamp=10.6), 10.6, 100.6)
+        lease.receive(grant(sequence=2, stamp=10.1 + H), 10.1 + H, 100.1 + H)
 
 
 def geometry():
@@ -111,12 +111,12 @@ def test_validation_pause_keeps_actual_receipt_time_without_late_revival():
     times = iter([1., 1.354])
     assert lease.receive_checked(lambda: grant(sequence=1), 10., clock=lambda: next(times))
     assert lease.wall_stamp == 1.  # Not artificially freshened to 1.354.
-    assert lease.ready(10., 1.49)
+    assert lease.ready(10., .99 + H)
     with pytest.raises(ValueError, match="expired"):
-        lease.ready(10., 1.501)
+        lease.ready(10., 1.001 + H)
 
 
-@pytest.mark.parametrize("arrival,completion", [(1.301, 1.4), (1., 1.501)])
+@pytest.mark.parametrize("arrival,completion", [(.801 + H, .9 + H), (1., 1.001 + H)])
 def test_checked_receipt_rejects_expired_entry_or_slow_validation(arrival, completion):
     lease = ShadowLease(CAPTURE)
     lease.receive(grant(sequence=0), 10., .8)

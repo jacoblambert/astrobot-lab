@@ -95,3 +95,66 @@ def test_no_candidate_fast_path_skips_fitting_without_changing_costs(monkeypatch
     actual, mask = navigation_costs(layers)
     np.testing.assert_array_equal(actual, expected)
     assert not mask.any()
+
+
+BOUNDED = GapPolicy(mode="bounded", hazard_clearance_m=0.30)
+
+
+def test_bounded_frees_connected_gap_edges_but_not_a_large_gap_interior():
+    layers = terrain(41)
+    layers[5:36, 5:36, 0] = -1  # 3.1 m square gap of missing returns
+    costs, mask = navigation_costs(layers, policy=BOUNDED)
+    assert mask[5, 5:36].all() and mask[9, 20]  # 0.4 m from measured ground
+    assert not mask[20, 20] and costs[20, 20] == -1  # 1.5 m inside: stays unknown
+    isolated, _ = navigation_costs(layers)
+    assert not _.any() and (isolated[5:36, 5:36] == -1).all()
+
+
+@pytest.mark.parametrize("reason", [3, 5, 6, 7, 8, 10, 11])
+def test_bounded_never_softens_explicit_conflicts_or_their_shadow(reason):
+    layers = terrain()
+    layers[8:13, 8:13, 0] = -1
+    layers[10, 10, 1] = reason
+    costs, mask = navigation_costs(layers, policy=BOUNDED)
+    assert costs[10, 10] == -1 and not mask[10, 10]
+    # every softened cell keeps the policy clearance from the conflict
+    rows, cols = np.nonzero(mask)
+    assert (np.hypot(rows - 10, cols - 10) * .1 > .30).all()
+
+
+def test_bounded_unknown_next_to_an_obstacle_stays_unknown():
+    layers = terrain()
+    layers[:, 12:, 0] = -1  # occluded half-plane behind a rock
+    layers[10, 11, 0] = 100
+    costs, mask = navigation_costs(layers, policy=BOUNDED)
+    assert not mask[10, 12:14].any() and costs[10, 12] == -1
+    assert mask[2, 12] and costs[2, 12] >= BOUNDED.cost
+
+
+def test_bounded_requires_measured_not_inferred_support():
+    layers = terrain()
+    layers[:, :, 0] = 20
+    layers[10, 10, 0] = -1
+    _, mask = navigation_costs(layers, policy=BOUNDED)
+    assert not mask.any()
+
+
+def test_invalid_mode_and_gap_fail():
+    with pytest.raises(ValueError):
+        GapPolicy(mode="optimistic")
+    with pytest.raises(ValueError):
+        GapPolicy(mode="bounded", max_support_gap_m=0)
+
+
+def test_occupied_shadow_is_published_lethal_only_when_requested():
+    layers = terrain()
+    layers[:, 12:, 0] = -1
+    layers[10, 11, 0] = 100
+    policy = GapPolicy(mode="bounded", hazard_clearance_m=0.30, occupied_shadow_lethal_m=0.20)
+    costs, mask = navigation_costs(layers, policy=policy)
+    assert costs[10, 12] == 100 and costs[10, 13] == 100 and costs[10, 14] < 100
+    assert not mask[10, 12:14].any()
+    plain, _ = navigation_costs(layers, policy=BOUNDED)
+    assert plain[10, 12] == -1
+    with pytest.raises(ValueError):
+        GapPolicy(occupied_shadow_lethal_m=-1)

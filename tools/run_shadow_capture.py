@@ -35,7 +35,7 @@ from capture_polling import StorageCheck
 from audit_shadow_inputs import transform7
 from export_shadow_trajectory import pose_matrix, revision_record, stamp_ns
 from live_revision_gate import LiveRevisionGate
-from shadow_capture_gate import PhysicsIMUReadiness, ShadowLease, validate_shadow_geometry
+from shadow_capture_gate import HEARTBEAT_S, PhysicsIMUReadiness, ShadowLease, validate_shadow_geometry
 from run_stationary_revision_check import stop
 from selected_lidar_profile import TOPIC as SELECTED_TOPIC, required_topics as selected_topics, validate_config
 
@@ -337,8 +337,8 @@ class Capture(Node):
             epoch_matches=self.status is not None and self.revision is not None
                 and self.status.epoch == self.revision.localization_epoch,
             pose_fresh=self.status is not None and 0 <= now-stamp_ns(self.status.last_pose_stamp)/1e9 <= .5,
-            status_heartbeat=wall-self.status_wall <= .5, request_heartbeat=wall-self.request_wall <= .5,
-            clock_heartbeat=wall-self.last_clock_wall <= .5,
+            status_heartbeat=wall-self.status_wall <= HEARTBEAT_S, request_heartbeat=wall-self.request_wall <= HEARTBEAT_S,
+            clock_heartbeat=wall-self.last_clock_wall <= HEARTBEAT_S,
             revisions_recorded=self.counts["/astrobot_0/slam_raw/revisions"] >= 10,
             observations_recorded=self.counts["/astrobot_0/slam_raw/observations"] >= 10,
             required_topics_recorded=all(self.counts[t] for t in self.required_topics),
@@ -347,7 +347,7 @@ class Capture(Node):
             sole_driver=len(publishers) == (0 if self.natural_stationary else 1))
         self.last_readiness_checks = checks
         if self.terrain_library_sha256 is not None:
-            checks["terrain_status_heartbeat"] = self.terrain_status is not None and wall-self.terrain_status_wall <= .5
+            checks["terrain_status_heartbeat"] = self.terrain_status is not None and wall-self.terrain_status_wall <= HEARTBEAT_S
             # Native capture starts only after the existing grant. Permit that
             # startup handshake, not a moving indefinite all-unknown mapper.
             checks["terrain_mapping_live"] = (self.terrain_first_stamp is None or now-self.terrain_first_stamp <= .4
@@ -407,6 +407,9 @@ def main():
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--archive-root", type=Path, default=Path("/archive"))
     parser.add_argument("--wall-seconds", type=float, default=900.)
+    # A simulator capture that fails its pre-motion audit never publishes a request;
+    # without this the recorder waits out the whole --wall-seconds (transit50, Oct 20).
+    parser.add_argument("--request-seconds", type=float, default=900.)
     parser.add_argument("--require-physics-imu", action="store_true",
                         help="Require healthy paired 60 Hz IMU/clock before and throughout motion")
     parser.add_argument("--natural-stationary", action="store_true",
@@ -425,9 +428,13 @@ def main():
     parser.add_argument("--contact-startup-turn-area", action="store_true", help="Declare fixed physical turning-circle deployment support, no added skid margin")
     parser.add_argument("--contact-current-turn-area", action="store_true", help="Assume turning area at actual current pose; hazards still veto, no inferred history")
     parser.add_argument("--contact-support-core", action="store_true", help="Explicit experimental smaller support region; full hazard vetoes remain")
+    parser.add_argument("--planner-gap-policy", choices=("nav2_bounded_shadow",), default="",
+                        help="Publish /terrain_shadow/planner_costmap under the C1-gated Nav2 policy, rover footprint cleared")
     args = parser.parse_args()
     if args.isolated_gap_costs and not args.terrain_v2:
         parser.error("isolated-gap costs require v2 terrain")
+    if args.planner_gap_policy and (args.isolated_gap_costs or not args.terrain_v2):
+        parser.error("planner gap policy requires v2 terrain and excludes --isolated-gap-costs")
     from costmap_scenarios import TRIAL_PATTERNS
     if args.natural_motion in TRIAL_PATTERNS and not (
             args.terrain_v2 and args.contact_advisory and args.contact_startup_turn_area and not args.contact_support_core):
@@ -487,6 +494,8 @@ def main():
             storage_checks = StorageCheck()
             while time.monotonic()-start < args.wall_seconds:
                 rclpy.spin_once(node, timeout_sec=.02)
+                if node.request is None and time.monotonic()-start > args.request_seconds:
+                    raise TimeoutError("no simulator capture request; check the simulator log for a pre-motion failure")
                 # Teleport/static calibration precede this request. Do not
                 # initialize an estimator on pre-teleport measurements.
                 if launch is None and node.request is not None:
@@ -519,6 +528,8 @@ def main():
                             command.append(f"terrain_library:={args.terrain_library}")
                             if args.isolated_gap_costs:
                                 command.append("isolated_gap_costs:=true")
+                            if args.planner_gap_policy:
+                                command.append(f"planner_gap_policy:={args.planner_gap_policy}")
                             if args.contact_advisory:
                                 command.extend(["contact_advisory:=true", "contact_deployment_confirmed:=true"])
                             if args.contact_current_turn_area:
@@ -619,6 +630,7 @@ def main():
     result["selected_lidar"] = args.selected_lidar
     result["terrain_shadow_required"] = bool(args.terrain_library)
     result["isolated_gap_costs"] = args.isolated_gap_costs
+    result["planner_gap_policy"] = args.planner_gap_policy or None
     result["contact_advisory_required"] = args.contact_advisory
     result["contact_startup_turn_area"] = args.contact_startup_turn_area
     result["experimental_contact_support_core"] = args.contact_support_core
@@ -635,7 +647,7 @@ def main():
         required |= set(TERRAIN_TOPICS)
     if args.contact_advisory:
         required.add("/terrain_shadow/contact_advisory")
-    if args.isolated_gap_costs:
+    if args.isolated_gap_costs or args.planner_gap_policy:
         required.update(("/terrain_shadow/planner_costmap", "/terrain_shadow/uncertainty_mask"))
     if args.natural_motion in TRIAL_PATTERNS:
         required.add("/terrain_trial/proposal")
