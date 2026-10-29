@@ -1,10 +1,12 @@
 [submodule "OmniLRS"]
 	path = OmniLRS
 	url = git@github.com:jacoblambert/OmniLRS.git
-	branch = astrobot/phase1-lunaryard-baseline
+	branch = astrobot/phase4-resource-layer
 [submodule "astrobot-lab/src/glim"]
 	path = astrobot-lab/src/glim
 	url = git@github.com:Open-Space-Systems/glim.git
+	branch = feat/imu_gravity_param
 [submodule "astrobot-lab/src/glim_ros2"]
 	path = astrobot-lab/src/glim_ros2
 	url = git@github.com:Open-Space-Systems/glim_ros2.git
+	branch = astrobot/v2-nav
