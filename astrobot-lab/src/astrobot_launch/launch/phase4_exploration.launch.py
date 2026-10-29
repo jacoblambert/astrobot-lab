@@ -95,6 +95,16 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("exploration_start_delay", default_value="35.0"),
             DeclareLaunchArgument("mission_mode", default_value="explore_radius"),
             DeclareLaunchArgument("exploration_map_topic", default_value="slam/bev_costmap"),
+            # v2: slam_stack:=v2 nav2_params:=<share>/config/nav2_v2.yaml exploration_map_topic:=/terrain_shadow/exploration_map
+            DeclareLaunchArgument("slam_stack", default_value="legacy"),
+            # v2: 1.5 (a stationary rover's v2 window has nothing reachable; see exploration_manager)
+            DeclareLaunchArgument("reveal_distance_m", default_value="0.0"),
+            DeclareLaunchArgument("reachable_seed_distance_m", default_value="0.0"),
+            DeclareLaunchArgument("home_approach_radius_m", default_value="0.0"),
+            DeclareLaunchArgument("return_behavior_tree", default_value=""),
+            DeclareLaunchArgument("mission_visit_margin_m", default_value="0.0"),
+            DeclareLaunchArgument("nav2_params", default_value=PathJoinSubstitution(
+                [FindPackageShare("astrobot_launch"), "config", "nav2_phase3_bev.yaml"])),
             DeclareLaunchArgument("teleop_goal_topic", default_value="teleop/goal"),
             DeclareLaunchArgument("home_radius_m", default_value="16.0"),
             DeclareLaunchArgument("coverage_goal_fraction", default_value="0.30"),
@@ -189,6 +199,8 @@ def generate_launch_description() -> LaunchDescription:
                 launch_arguments={
                     "use_sim_time": use_sim_time,
                     "robot_namespace": robot_namespace,
+                    "slam_stack": LaunchConfiguration("slam_stack"),
+                    "nav2_params": LaunchConfiguration("nav2_params"),
                 }.items(),
             ),
             TimerAction(
@@ -224,6 +236,15 @@ def generate_launch_description() -> LaunchDescription:
                                 "robot_namespace": robot_namespace,
                                 "mission_mode": mission_mode,
                                 "map_topic": exploration_map_topic,
+                                "reveal_distance_m": ParameterValue(LaunchConfiguration("reveal_distance_m"), value_type=float),
+                                "reachable_seed_distance_m": ParameterValue(
+                                    LaunchConfiguration("reachable_seed_distance_m"), value_type=float),
+                                "home_approach_radius_m": ParameterValue(
+                                    LaunchConfiguration("home_approach_radius_m"), value_type=float),
+                                "return_behavior_tree": ParameterValue(
+                                    LaunchConfiguration("return_behavior_tree"), value_type=str),
+                                "mission_visit_margin_m": ParameterValue(
+                                    LaunchConfiguration("mission_visit_margin_m"), value_type=float),
                                 "pose_topic": "slam/pose_corrected",
                                 "teleop_goal_topic": teleop_goal_topic,
                                 "action_name": "navigate_to_pose",

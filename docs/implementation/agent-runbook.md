@@ -282,6 +282,65 @@ Pass: 0 `shadow_transit_hits_*` (contact before the 0.65 m goal tolerance) and
 `shadow_found_gt_blocked` 0. Arrival contacts are a goal-placement/controller matter. Results
 are in `docs/decision-2026-10.md` item 4.
 
+### v2 Nav2 stack, closed loop (Oct 22)
+
+v2 is the only map on this stack:
+- the sim nav stream (`OMNILRS_SELECTED_NAV`) feeds GLIM and the v2 publisher;
+- `live_local_terrain.py deployment:=nav` serves `slam/reset_map` and publishes the window plus
+  `/terrain_shadow/global_costmap` (the mosaic);
+- the supervisor's `map_topic` is the window;
+- Nav2 reads both through `nav2_v2.yaml`.
+
+Bring-up:
+
+```bash
+C="docker compose -f docker-compose.lunaryard.yml -f docker-compose.archive.yml -f docker-compose.selected-nav.yml"
+OMNILRS_ENVIRONMENT_SEED=43 $C up -d --no-deps astrobot-sim   # wait for "SELECTED_NAV tile" in its log
+docker exec -d astrobot-selected-dev bash -c 'source /etc/ros_setup.sh; source /workspace/astrobot-lab/astrobot-lab/install/setup.bash;
+  ros2 launch astrobot_launch phase3_nav.launch.py slam_stack:=v2 slam_start_delay:=5.0 \
+    nav2_params:=$(ros2 pkg prefix astrobot_launch)/share/astrobot_launch/config/nav2_v2.yaml > /tmp/v2.log 2>&1'
+# wait for /astrobot_0/localization/status reason "validated", then e.g.
+tools/v2_nav_trial.py --scene-run <SELECTED_NAV run> --goals 10    # in the container, PYTHONPATH as above
+$C stop astrobot-sim; $C rm -f astrobot-sim                         # never `down`
+```
+
+Options and gotchas:
+- **Faults:** `rtk_occlusion_period_s:=150.0 rtk_occlusion_duration_s:=10.0` (RTK lost while
+  sim % period < duration).
+- **Raw archive:** `terrain_archive_raw:=true` archives native bytes for an audit-suite
+  replay, at ~28 MB per sim-s.
+- **Gates:** `tools/v2_gate_run.sh <seed> <explore_radius|sample_return>` runs one attempt with
+  the legacy mission parameters, a GT-scored eval on the mosaic, and offline GT rock contacts
+  (`tools/score_gt_contacts.py`). Everything goes to one archive run, then the sim is
+  stopped and removed.
+  The eval starts before the mission and runs with `--home-from-gt-start`: coverage and
+  home distance are scored about the rover's spawn GT pose (as the manager anchors its
+  grid), with the nominal-home figures kept in `verdict.metrics` for legacy comparison.
+  Contacts with rocks already under the spawn body are reported as `spawn_rock_contacts`.
+  Nav runs allocate with a 20 GiB free-space reserve (gate run, sim nav stream, nav
+  publisher `archive_reserve_gib`); a run writes MBs. Captures keep the 50 GiB default.
+- **Archive reconnects:** if `/archive` gives EIO inside `astrobot-selected-dev` while the
+  host mount works, the container holds a stale bind; `docker restart astrobot-selected-dev`
+  (idle) re-binds it.
+- **Exploration on v2:** use `exploration_map_topic:=/terrain_shadow/exploration_map` (the
+  class mosaic), `reveal_distance_m:=1.5`, `reachable_seed_distance_m:=1.0` and
+  `home_approach_radius_m:=0.5` with
+  `return_behavior_tree:=<share>/behavior_trees/navigate_to_pose_lunar_recovery_precise.xml`
+  (its 0.35 m goal checker keeps a return success inside the 0.9 m home radius; other goals
+  keep 0.65) and `nav_through_poses_bt_xml:=<share>/behavior_trees/navigate_through_poses_v2.xml`.
+  `nav2_v2.yaml` loads two goal checkers, so every BT's `FollowPath` must name one; the
+  phase3 BT (`navigate_to_pose_lunar_recovery.xml`) names `general_goal_checker`, the only
+  checker of the legacy configs. New BT files need `colcon build --packages-select
+  astrobot_launch` to install. `mission_visit_margin_m:=0.15` keeps the manager's coverage
+  count at or below GT (a cell counts only when the pose is 0.15 m inside it).
+  The cost mosaic's taper and gap-policy values
+  are wrong for the manager's free/clearance thresholds, and a stationary rover has nothing
+  reachable until it moves.
+- **Launch-argument names:** `v2_slam.launch.py` arguments must not reuse phase3 names.
+  Launch configurations are shared with included files, so a reused name such as
+  `glim_config_path` silently takes the legacy default (T1 first ran GLIM on the legacy
+  config and topics).
+
 ## October 6: experimental planner costs and path checks
 
 This is costmap-to-path testing, not Nav2 command execution. Core files:

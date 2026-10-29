@@ -270,7 +270,8 @@ class UiBridgeNode(Node):
         self._align_fitted = False
         self._last_gt_pose: dict[str, float] | None = None
 
-        self._subscribe_grid("obstacle", "slam/bev_costmap")
+        # v2 stack: /terrain_shadow/global_costmap (the mosaic of v2 planner windows)
+        self._subscribe_grid("obstacle", self.declare_parameter("obstacle_map_topic", "slam/bev_costmap").value)
         self._subscribe_grid("mission", "exploration/mission_grid")
         self._subscribe_grid("water", "/gt/resource_maps/water")
         self._subscribe_grid("gt", "/gt/map")

@@ -47,8 +47,8 @@ def horizontal_vertical_sigma(c):
 
 
 class LocalizationSupervisor(Node):
-    def __init__(self):
-        super().__init__("localization_supervisor")
+    def __init__(self, **kwargs):
+        super().__init__("localization_supervisor", **kwargs)
         self.config_path = Path(self.declare_parameter("config_path", "").value)
         # Pose-only acquisition, never navigation readiness. Default stays false.
         self.shadow_mode = bool(self.declare_parameter("shadow_mode", False).value)
@@ -91,7 +91,10 @@ class LocalizationSupervisor(Node):
         self.create_subscription(PoseStamped, "slam_raw/pose_corrected", self._pose, 20)
         self.create_subscription(PoseStamped, "slam_raw/lidar_pose_corrected", self._lidar, 20)
         self.create_subscription(PointCloud2, "slam_raw/aligned_points_corrected", self._cloud, qos_profile_sensor_data)
-        self.create_subscription(OccupancyGrid, "slam/bev_costmap", self._map, 2)
+        # Map-rebuild readiness source: the legacy BEV mapper, or the v2 planner window
+        # (v2_nav.launch.py). Whichever it is must also serve slam/reset_map.
+        self.map_topic = self.declare_parameter("map_topic", "slam/bev_costmap").value
+        self.create_subscription(OccupancyGrid, self.map_topic, self._map, 2)
         self.create_subscription(Bool, "slam/map_integrity", self._map_integrity, 10)
         self.create_subscription(GoalStatusArray, "navigate_to_pose/_action/status", self._nav_status, 10)
         self.reset_client = self.create_client(ResetMap, "slam/reset_map")
@@ -250,7 +253,9 @@ class LocalizationSupervisor(Node):
             queue.extend(waiting)
 
     def _map(self, msg):
-        self.map_ready, self.map_stamp = False, None
+        # Freshness follows the newest valid map: one late or rejected message (a load spike on
+        # the v2 publisher) must not read as a stale map and restart GLIM (seed-7 gate, Oct 28).
+        self.map_ready = False
         info = msg.info
         if (msg.header.frame_id != "map" or self.last_pose is None
                 or stamp(msg) < self.minimum_stamp or not 0 <= self.now_sec()-stamp(msg) <= .75

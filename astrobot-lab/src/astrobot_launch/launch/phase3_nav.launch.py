@@ -2,7 +2,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, LogInfo, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import EqualsSubstitution, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node, PushRosNamespace
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
@@ -21,6 +21,7 @@ def generate_launch_description() -> LaunchDescription:
     slam_base_offset_y = LaunchConfiguration("slam_base_offset_y")
     slam_base_yaw_offset = LaunchConfiguration("slam_base_yaw_offset")
     robot_namespace = LaunchConfiguration("robot_namespace")
+    slam_stack = LaunchConfiguration("slam_stack")
     nav_to_pose_bt_xml = PathJoinSubstitution(
         [FindPackageShare("astrobot_launch"), "behavior_trees", "navigate_to_pose_lunar_recovery.xml"]
     )
@@ -33,6 +34,9 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("start_nav2", default_value="true"),
             DeclareLaunchArgument("start_slam_tf", default_value="true"),
             DeclareLaunchArgument("slam_start_delay", default_value="15.0"),
+            # legacy: phase2_slam (BEV mapper). v2: v2_slam (supervised GLIM + v2 terrain, selected
+            # LiDAR sim stream); pair with nav2_params:=.../nav2_v2.yaml.
+            DeclareLaunchArgument("slam_stack", default_value="legacy"),
             DeclareLaunchArgument(
                 "glim_config_path",
                 default_value=PathJoinSubstitution(
@@ -75,12 +79,20 @@ def generate_launch_description() -> LaunchDescription:
                 actions=[
                     IncludeLaunchDescription(
                         PythonLaunchDescriptionSource(
+                            [PathJoinSubstitution([FindPackageShare("astrobot_launch"), "launch", "v2_slam.launch.py"])]
+                        ),
+                        condition=IfCondition(EqualsSubstitution(slam_stack, "v2")),
+                        launch_arguments={"use_sim_time": use_sim_time, "robot_namespace": robot_namespace}.items(),
+                    ),
+                    IncludeLaunchDescription(
+                        PythonLaunchDescriptionSource(
                             [
                                 PathJoinSubstitution(
                                     [FindPackageShare("astrobot_launch"), "launch", "phase2_slam.launch.py"]
                                 )
                             ]
                         ),
+                        condition=IfCondition(EqualsSubstitution(slam_stack, "legacy")),
                         launch_arguments={
                             "use_sim_time": use_sim_time,
                             "robot_namespace": robot_namespace,

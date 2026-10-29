@@ -23,7 +23,8 @@ from rclpy.node import Node
 from std_msgs.msg import Float32, String
 from astrobot_core.mission import ActionGeneration, home_reached
 from astrobot_interfaces.msg import LocalizationStatus
-from exploration_manager.reachability import clearance_components, component_at
+from exploration_manager.reachability import clearance_components, component_near
+from scipy.ndimage import distance_transform_edt
 from tf2_ros import Buffer, TransformListener
 
 
@@ -97,7 +98,16 @@ class ExplorationManager(Node):
         # though best_sample was 0.86). More lenient than near_goal_success_radius_m (0.65), kept
         # under the gate's home_tol (1.0m) so a mission-declared "home" still GT-scores as home.
         self.home_reached_radius_m = float(self.declare_parameter("home_reached_radius_m", 0.9).value)
+        # > 0: if a mapped obstacle lies within home_approach_clearance_m of home (seed 7 spawns
+        # over a rock, so Smac can never end a path there), return to the nearest known-free cell
+        # with that clearance within this radius instead. Keep radius + Nav2 xy goal tolerance
+        # under home_reached_radius_m, which a return_home success must still satisfy.
+        self.home_approach_radius_m = float(self.declare_parameter("home_approach_radius_m", 0.0).value)
+        self.home_approach_clearance_m = float(self.declare_parameter("home_approach_clearance_m", 0.5).value)
+        # Optional NavigateToPose behavior tree for return_home (v2: a tighter goal checker).
+        self.return_behavior_tree = str(self.declare_parameter("return_behavior_tree", "").value)
         self.coverage_goal_fraction = float(self.declare_parameter("coverage_goal_fraction", 0.30).value)
+        self.mission_visit_margin_m = float(self.declare_parameter("mission_visit_margin_m", 0.0).value)
         self.sample_success_threshold = float(self.declare_parameter("sample_success_threshold", 0.75).value)
         self.max_goals = int(self.declare_parameter("max_goals", 500).value)
         self.max_duration_sec = float(self.declare_parameter("max_duration_sec", 900.0).value)
@@ -113,6 +123,16 @@ class ExplorationManager(Node):
         self.max_frontiers = int(self.declare_parameter("max_frontiers", 80).value)
         self.goal_clearance_cells = int(self.declare_parameter("goal_clearance_cells", 3).value)
         self.goal_clearance_radius_m = float(self.declare_parameter("goal_clearance_radius_m", 0.75).value)
+        # Reveal: a front-mounted LiDAR cannot see the ground beside a stationary rover, so a local
+        # map (v2) starts, and restarts after a localization reset, with nothing reachable. Send a
+        # short goal (ahead, left, right, back) through that blind ring instead of ending the
+        # mission with no_candidates; Nav2 still checks it. 0 disables (legacy BEV map).
+        self.reveal_distance_m = float(self.declare_parameter("reveal_distance_m", 0.0).value)
+        # > 0: when the rover's own cell lacks goal clearance, seed reachability from clear cells
+        # within this distance through known-free cells (v2: unseen patches beside the rover).
+        self.reachable_seed_distance_m = float(self.declare_parameter("reachable_seed_distance_m", 0.0).value)
+        self.reveal_max_attempts = int(self.declare_parameter("reveal_max_attempts", 4).value)
+        self.reveal_attempts = 0
         self.goal_clearance_cost_min = int(self.declare_parameter("goal_clearance_cost_min", 80).value)
         self.max_goal_distance_m = float(self.declare_parameter("max_goal_distance_m", 5.0).value)
         self.blacklist_radius_m = float(self.declare_parameter("blacklist_radius_m", 0.75).value)
@@ -574,11 +594,33 @@ class ExplorationManager(Node):
 
         candidates = self._find_candidates()
         self._publish_frontiers(candidates)
+        if candidates:
+            self.reveal_attempts = 0
         if not candidates:
+            if self._send_reveal_goal():
+                return
             self._send_return_home("no_candidates")
             return
         best = candidates[0]
         self._send_goal(Pose2D(best.x, best.y, self.latest_pose.yaw), "explore", best)
+
+    def _send_reveal_goal(self) -> bool:
+        """No candidates (blind ring, or only a small seeded pocket is reachable): a short goal into
+        the unseen ring, not the end of the mission. Bounded per stuck episode; the counter resets
+        once candidates exist (a reachable pocket without candidates ended seed 411, Oct 28)."""
+        if self.reveal_distance_m <= 0.0 or self.reveal_attempts >= self.reveal_max_attempts:
+            return False
+        offset = (0.0, math.pi / 2, -math.pi / 2, math.pi)[self.reveal_attempts % 4]
+        self.reveal_attempts += 1
+        yaw = self.latest_pose.yaw + offset  # latest_pose is base_link (composed in _pose_cb)
+        pose = Pose2D(self.latest_pose.x + self.reveal_distance_m * math.cos(yaw),
+                      self.latest_pose.y + self.reveal_distance_m * math.sin(yaw), yaw)
+        cell = self._world_to_cell(pose.x, pose.y)
+        if cell is not None and self.grid[cell] >= self.lethal_cost_min:
+            return self._send_reveal_goal()
+        self._publish_event("reveal_goal", kind="reveal", pose=pose, attempt=self.reveal_attempts)
+        self._send_goal(pose, "reveal", None)
+        return True
 
     def _send_return_home(self, reason: str) -> None:
         if self.returning_home or self.home_pose is None:
@@ -587,7 +629,36 @@ class ExplorationManager(Node):
         self.return_reason = reason
         self.return_waypoints = []
         self.return_home_started_at = self._now()
-        self._send_goal(self.home_pose, "return_home", None)
+        self._send_goal(self._home_goal_pose(), "return_home", None)
+
+    def _home_goal_pose(self) -> Pose2D:
+        home = self.home_pose
+        if self.home_approach_radius_m <= 0.0 or self.grid is None or self.latest_map is None:
+            return home
+        cell = self._world_to_cell(home.x, home.y)
+        if cell is None:
+            return home
+        res = self.latest_map.info.resolution
+        reach = int(math.ceil((self.home_approach_radius_m + self.home_approach_clearance_m) / res)) + 1
+        r0, c0 = max(0, cell[0] - reach), max(0, cell[1] - reach)
+        window = self.grid[r0:cell[0] + reach + 1, c0:cell[1] + reach + 1]
+        clearance = distance_transform_edt(window < self.lethal_cost_min) * res
+        rows, cols = np.indices(window.shape)
+        xs = self.latest_map.info.origin.position.x + (cols + c0 + 0.5) * res
+        ys = self.latest_map.info.origin.position.y + (rows + r0 + 0.5) * res
+        offset = np.hypot(xs - home.x, ys - home.y)
+        if clearance[cell[0] - r0, cell[1] - c0] > self.home_approach_clearance_m:
+            return home
+        ok = ((window >= 0) & (window <= self.free_cost_max) & (clearance > self.home_approach_clearance_m)
+              & (offset <= self.home_approach_radius_m))
+        if not ok.any():
+            return home
+        best = np.unravel_index(np.argmin(np.where(ok, offset, np.inf)), ok.shape)
+        pose = Pose2D(float(xs[best]), float(ys[best]), home.yaw)
+        self.get_logger().info(f"return home: obstacle at home; approach x={pose.x:.2f} y={pose.y:.2f} "
+                               f"({offset[best]:.2f} m from home)")
+        self._publish_event("home_approach", kind="return_home", pose=pose)
+        return pose
 
     def _pose_is_inside_breadcrumb_radius(self, pose: Pose2D) -> bool:
         if self.home_pose is None or self.breadcrumb_max_home_radius_factor <= 0.0:
@@ -636,7 +707,7 @@ class ExplorationManager(Node):
         if self.require_localization and not self._motion_allowed():
             self._resume_goal = (pose, kind, candidate)
             return
-        if self.planner_precheck_enabled and kind != "return_home":
+        if self.planner_precheck_enabled and kind not in ("return_home", "reveal"):
             self._start_planner_precheck(pose, kind, candidate)
         else:
             # Home is a normal global Nav2 goal, including its bounded recovery for blocked starts.
@@ -679,6 +750,8 @@ class ExplorationManager(Node):
         goal.pose.pose.orientation.y = qy
         goal.pose.pose.orientation.z = qz
         goal.pose.pose.orientation.w = qw
+        if kind == "return_home" and self.return_behavior_tree:
+            goal.behavior_tree = self.return_behavior_tree
         self._publish_selected_goal(goal.pose)
         score = candidate.total_score if candidate is not None else 0.0
         self.get_logger().info(
@@ -1789,7 +1862,8 @@ class ExplorationManager(Node):
         if self._component_cache is None:
             self._component_cache = clearance_components(
                 known_free, self.latest_map.info.resolution, self.goal_clearance_radius_m)
-        return component_at(self._component_cache, start)
+        steps = int(math.ceil(self.reachable_seed_distance_m / self.latest_map.info.resolution))
+        return component_near(self._component_cache, known_free, start, steps)
 
     def _resource_score_near(self, row: int, col: int) -> float:
         if self.latest_map is None:
@@ -1894,6 +1968,13 @@ class ExplorationManager(Node):
 
     def _mark_mission_cell_visited(self, pose: Pose2D) -> None:
         cell = self._mission_cell_for_xy(pose.x, pose.y)
+        m = self.mission_visit_margin_m
+        # A pose within the localization error of a cell edge may lie in the neighbour: count the
+        # cell only when the pose is this far inside it, so online coverage cannot read above GT
+        # on corner-clipped cells (seeds 42/411: 37 online vs 36 GT cells at the 0.70 stop).
+        if m > 0.0 and cell is not None and not (
+                self._mission_cell_for_xy(pose.x - m, pose.y - m) == cell == self._mission_cell_for_xy(pose.x + m, pose.y + m)):
+            return
         if cell is not None:
             self.visited_mission_cells.add(cell)
 

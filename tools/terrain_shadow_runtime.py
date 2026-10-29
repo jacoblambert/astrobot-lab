@@ -21,7 +21,7 @@ class ReceiptScheduler:
             self.pending.clear()
             self.bytes = 0
             raise ValueError(self.core.failure)
-        self.pending.append((kind, payload))
+        self.pending.append((kind, payload, size))
         self.bytes += size
 
     def clock(self, stamp):
@@ -33,7 +33,14 @@ class ReceiptScheduler:
         try:
             self.core._check()
             while self.pending:
-                kind, payload = self.pending.popleft()
+                kind, payload, _ = self.pending[0]
+                if kind == "revision" and max((f["stamp_ns"] for f in payload.get("frames") or ()), default=-1) > stamp:
+                    # Received while this subscriber's /clock queue lagged (live load): the
+                    # first clock at/after its newest measurement is the receipt bound. Later
+                    # receipts keep their order behind it. Streams that never hit this replay
+                    # unchanged (it previously faulted "measurement after arrival").
+                    break
+                self.pending.popleft()
                 if kind == "revision":
                     self.core.revision(payload, stamp)
                 elif kind == "chunk":
@@ -45,4 +52,4 @@ class ReceiptScheduler:
             self.pending.clear()
             raise
         finally:
-            self.bytes = 0
+            self.bytes = sum(size for _, _, size in self.pending)

@@ -6,7 +6,8 @@
           <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"
             error_code_id="{compute_path_error_code}" />
         </RateController>
-        <FollowPath path="{path}" controller_id="FollowPath" error_code_id="{follow_path_error_code}" />
+        <FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="general_goal_checker"
+          error_code_id="{follow_path_error_code}" />
       </PipelineSequence>
       <Sequence name="BoundedLocalEscape">
         <BackUp backup_dist="0.65" backup_speed="0.08" time_allowance="12.0"

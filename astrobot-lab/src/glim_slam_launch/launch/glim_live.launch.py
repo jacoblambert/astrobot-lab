@@ -23,6 +23,8 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("config_path", default_value=default_config_path),
             DeclareLaunchArgument("shadow_mode", default_value="false"),
             DeclareLaunchArgument("shadow_seed_path", default_value=""),
+            # Supervisor map-readiness input; v2_slam.launch.py uses the v2 planner window.
+            DeclareLaunchArgument("map_topic", default_value="slam/bev_costmap"),
             # Self-filter box FLIPPED for the front+lower LiDAR re-mount (2026-06-13): LiDAR moved
             # to base (0.40,0,0.25) so the chassis is now BEHIND/below it (negative x in lidar frame).
             DeclareLaunchArgument("crop_min_x", default_value="-0.95"),
@@ -60,6 +62,7 @@ def generate_launch_description() -> LaunchDescription:
                         output="screen",
                         parameters=[{"use_sim_time": use_sim_time, "config_path": config_path,
                                      "shadow_seed_path": LaunchConfiguration("shadow_seed_path"),
+                                     "map_topic": LaunchConfiguration("map_topic"),
                                      "shadow_mode": ParameterValue(LaunchConfiguration("shadow_mode"), value_type=bool)}],
                     ),
                 ]

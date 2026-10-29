@@ -523,3 +523,57 @@ def test_canonical_document_paths_and_legacy_index_exist():
     assert "docs/implementation/agent-runbook.md" in (ROOT / "agent-runbook.md").read_text()
     assert (ROOT / "docs/implementation/agent-runbook.md").is_file()
     assert (ROOT / "tools/legacy/README.md").is_file()
+
+
+def test_resume_after_joins_a_running_stream_once():
+    core = make()
+    core.resume_after("sim", 41)
+    points = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
+    core.revision(revision(1, [(0, 0, transform())]), 0)
+    core.chunk(dict(capture="sim", sequence=42, stamp_ns=0, points=points), 0)
+    assert core.received == 1 and core.sequence == 42
+    with pytest.raises(ValueError, match="already joined"):
+        core.resume_after("sim", 50)
+    fresh = make()
+    fresh.resume_after("sim", 41)
+    with pytest.raises(ValueError, match="discontinuity"):
+        fresh.chunk(dict(capture="sim", sequence=44, stamp_ns=0, points=points), 0)
+
+
+@pytest.mark.parametrize("tolerant", [False, True])
+def test_nav_stream_skips_dropped_and_late_chunks_and_pauses_when_stale(tolerant):
+    core = make(LocalConfig(tolerate_stream_gaps=True) if tolerant else None)
+    points = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
+    core.revision(revision(1, [(0, 0, transform())]), 0)
+    core.chunk(dict(capture="sim", sequence=0, stamp_ns=0, points=points), 0)
+    if not tolerant:
+        with pytest.raises(ValueError, match="discontinuity"):
+            core.chunk(dict(capture="sim", sequence=3, stamp_ns=10, points=points), 10)
+        return
+    core.chunk(dict(capture="sim", sequence=3, stamp_ns=10, points=points), 10)  # two dropped
+    late = 20 + 200_000_001  # received after its acquisition deadline: dropped, not a fault
+    core.chunk(dict(capture="sim", sequence=4, stamp_ns=20, points=points), late)
+    status = core.status()
+    assert core.received == 2 and status["skipped_sequences"] == 2 and status["late_chunks"] == 1
+    assert core.advance(late + 300_000_000) is None and core.failure is None  # stale input: no output
+    # Duplicates and stamp regressions still fault: they are not a lossy stream.
+    with pytest.raises(ValueError, match="discontinuity"):
+        core.chunk(dict(capture="sim", sequence=4, stamp_ns=30, points=points), late + 300_000_000)
+    regressed = make(LocalConfig(tolerate_stream_gaps=True))
+    regressed.chunk(dict(capture="sim", sequence=0, stamp_ns=50, points=points), 50)
+    with pytest.raises(ValueError, match="discontinuity"):
+        regressed.chunk(dict(capture="sim", sequence=1, stamp_ns=40, points=points), 50)
+
+
+def test_revision_received_ahead_of_the_clock_waits_for_a_covering_clock():
+    core = make()
+    runtime = ReceiptScheduler(core)
+    points = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
+    runtime.receive("revision", revision(1, [(0, 100_000_000, transform())]), 10)
+    runtime.receive("chunk", dict(capture="test", sequence=0, stamp_ns=50_000_000, points=points), 20)
+    runtime.clock(60_000_000)  # a lagging clock: before the revision's measurement
+    assert not core.failure and core.timeline is None and core.received == 0
+    assert len(runtime.pending) == 2 and runtime.bytes == 30
+    runtime.clock(100_000_000)
+    assert not core.failure and core.timeline is not None and core.received == 1
+    assert core.last_arrival_ns == 100_000_000 and not runtime.pending and runtime.bytes == 0

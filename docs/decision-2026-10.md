@@ -228,6 +228,199 @@ Integrate v2 as the Nav2 costmap source, with these changes in this order:
      - both replace `slam/bev_costmap`.
    - Not covered: the controller, and closed-loop effects such as the costmap lagging the
      rover.
+5. **v2 Nav2 stack built, closed loop passing T1–T3 (Oct 22, seed 43).**
+   `phase3_nav`/`phase4_exploration slam_stack:=v2 nav2_params:=…/nav2_v2.yaml`.
+   - **Sim:** the nav stream (`OMNILRS_SELECTED_NAV`, `docker-compose.selected-nav.yml`)
+     publishes the same selected-LiDAR points and native chunks without the capture harness,
+     at 0.4–0.47× real time.
+   - **Map:** the publisher's `deployment:=nav` serves `slam/reset_map` and the mosaic. The
+     supervisor's map readiness reads the v2 window. The legacy BEV mapper is not launched.
+   - **T1 static:**
+     - supervisor HEALTHY `validated`;
+     - `map→odom→base_link` only, no `gt_map`;
+     - window lag p50 / p95 0.217 / 0.233 s;
+     - the global costmap is the 600 × 600 mosaic, the local costmap the live window.
+   - **T2, 10 scripted 3–8 m goals** (`tools/v2_nav_trial.py`, trial `a8d8191a`):
+     - 9 succeeded;
+     - 0 GT body contacts with ≥ 0.10 m rocks;
+     - SLAM error p50 / p95 / max 2.4 / 6.1 / 12.9 cm.
+     - The miss was a publisher fault, `measurement after arrival: clock domains disagree`.
+       Under nav load its `/clock` queue lagged, so a GLIM revision got a stale receipt bound.
+       The supervisor held (`map_stale`), reset, restarted GLIM and validated again, and the
+       next goal succeeded.
+     - Fix: `ReceiptScheduler` holds such a revision until a covering clock. That is still a
+       causal bound, and streams that never faulted replay unchanged. Grids are now published
+       as int8 arrays; the 360k-cell mosaic was converted to a list every second.
+   - **T3, RTK 10 s outage every 150 sim-s, 8 goals** (trial `bf7e4dc4`):
+     - the outage hit mid-goal; the supervisor held motion at +1.98 s and the rover was still
+       by +2.5 s;
+     - the goal was cancelled, then `reset_map`, a GLIM restart, HEALTHY at +17.2 s;
+     - the mission resumed;
+     - 7 of 8 succeeded, 0 contacts, SLAM p95 / max 9.5 / 22 cm;
+     - no `map_stale` with the fix.
+   - **Bookkeeping budget.** GLIM's bookkeeping revisions carry the whole trajectory, and the
+     8,192-frame limit would end a mission at ~14 min. Nav raises it to 32,768. Accept is linear:
+     25 ms at 4,842 frames, 167 ms at 32,768.
+   - **Exploration on v2: two fixes from the first seed-42 gate attempts.** Both attempts
+     failed `coverage<0.7` with `no_candidates` and 0 contacts.
+     - First attempt (`9ab3da64`): the manager returned home at once. Its reachable set (cells
+       with a 0.75 m disk of known free, cost ≤ 35) was empty. A stationary rover's front LiDAR
+       never sees the ground beside the body: 127 unknown and 93 bounded-unknown cells within
+       ±0.8 m. The same happens after every supervisor map reset.
+     - Fix 1: an opt-in reveal goal (`reveal_distance_m`, 1.5 m on v2; 0 keeps legacy
+       unchanged). With nothing reachable, it sends a short goal ahead, then left, right, back;
+       4 attempts, then `no_candidates` as before.
+     - Second attempt (`fc3bb15b`): all four reveals succeeded and reachability stayed 0.
+       Two causes:
+       - the cost mosaic's latest-wins let the current blind ring's policy cells (70)
+         overwrite ground observed on approach;
+       - v2's 1 m display taper on observed cells (the legacy map has none) exceeds the
+         manager's free threshold near rocks.
+     - Fix 2: the mosaic keeps observations; policy cells fill only cells nothing has observed.
+       The manager reads a separate class mosaic, `/terrain_shadow/exploration_map`
+       (0 free / 100 occupied / −1 unknown, observations only), with the same semantics as the
+       legacy BEV map. The cost mosaic remains the Nav2 global input.
+     - Third attempt (`59cb3dc5`): explored after one reveal.
+       - 38 goals, 36 succeeded; the manager ended `coverage_goal_met` (online 0.712).
+       - Home within 0.76 m; 0 GT rock contacts; no localization holds.
+       - Gate: **FAIL by 0.008**, GT coverage 0.692 < 0.70. The manager stops at its own
+         0.70 estimate, which reads above GT here; this is the boundary that left the legacy
+         stack at 2/3.
+       - T4 data: the publisher stayed valid for the whole 636 sim-s, and RSS rose
+         188 → 292 MiB.
+       - Re-scored (Oct 27): the miss was the eval's reference, not the robot. The eval
+         centred its coverage grid on the nominal home (20, 18); the rover started at GT
+         (19.958, 17.976), and the manager centres on its own start. Anchored at the GT start,
+         the same track covers 37/52 = 0.712, equal to the manager's figure (the 4.8 cm shift
+         drops one corner-clipped cell). `phase4_exploration_eval.py --home-from-gt-start`
+         (used by `v2_gate_run.sh`) anchors coverage and home distance there and still reports
+         the nominal-home figures for comparison with legacy gates.
+     - Seed 411 explore, first attempt (`79ee30dc`, Oct 27): `no_candidates` after 4 reveal
+       goals, coverage 0.058, 0 contacts. The rover sat in an unknown patch the size of its
+       body: the front LiDAR never sees the spawn footprint, so no start cell was 0.75 m-clear
+       and reachable stayed 0 (stall snapshots: 3,410 free cells mapped, 0 reachable).
+       Fix: the exploration mosaic takes unobserved cells under the unpadded body as free
+       (the same `clear_footprint` the planner window uses); observed cells still win.
+       Offline on those snapshots, reachable rises 0 → 192 and 0 → 734 cells.
+     - Oct 27 setup note: the archive USB disk dropped on Oct 23 and re-mounted on Oct 26;
+       the dev container kept the dead bind (EIO) until it was restarted.
+     - Seed 411 explore, second attempt (`9d5cd98c`, body fix in): explored north and east
+       (26 goals, GT coverage 0.50, 0 contacts), then the publisher faulted on a native
+       chunk discontinuity at 0.36x sim speed. The supervisor held motion (`map_stale`),
+       restarted GLIM and reset the map, which wiped the mosaic; the rover re-revealed beside a
+       rock, two reveals aborted at once and the 6.4 m return failed. Fixes:
+       - nav deployment tolerates a lossy stream (`LocalConfig.tolerate_stream_gaps`): a
+         dropped or deadline-late chunk is skipped and counted (`skipped_sequences`,
+         `late_chunks` in status); stale input pauses projection instead of faulting, and
+         the supervisor's 1 s `map_stale` stays the outage gate. Identity changes and order
+         regressions still fault; captures stay strict;
+       - the chunk subscription queue is 64 deep (16 dropped after ~0.27 sim-s of stall).
+     - Seed 7 explore, first attempt (`e2aa8d4b`): three problems.
+       - World: the spawn sits over rock `instance_82` (0.12 m), so every seed-7 run starts in
+         GT contact. `score_gt_contacts.py` now reports rocks under the body at the first
+         sample as `spawn_rock_contacts`, outside `contacts_by_height`.
+       - Eval: `reference_invalid` from a `future_stamp` on the first GT pose, received
+         before the eval's first `/clock` (time 0). GT is now skipped until the clock runs.
+         Bring-up also outlasted the manager's 35 s start delay, so the eval's first GT pose
+         was already 0.35 m from spawn; `v2_gate_run.sh` now starts the eval before the
+         mission.
+       - Mission: no start cell had a clear 0.75 m disk (small unseen patches beside the
+         rover), so it kept issuing blind reveals; one ended with the padded footprint on a
+         rock's lethal cells, where Smac, MPPI and backup all refuse to move. Fix:
+         `reachable_seed_distance_m` (v2 gates: 1.0) seeds reachability from clear cells
+         reachable through known-free cells within that distance when the rover's own cell
+         lacks clearance. The walk cannot cross obstacles or unknown cells.
+     - Seed 411 explore, third attempt (`44ac0ac3`, Oct 28): after 3 reveals the seeded
+       reachable set was a small pocket with no mission candidates. Reveals required
+       reachable == 0, so the manager ended `no_candidates` at coverage 0.04 (0 contacts).
+       Reveals now fire whenever there are no candidates (still 4 per stuck episode; the count
+       resets only when candidates appear).
+     - Seed 7 explore, second attempt (`40a2a712`): GT coverage 0.75 and 0 avoidable contacts
+       (2,532 samples on the spawn rock reported apart), but the return failed. Home is the
+       spawn, on top of `instance_82`; once that rock is mapped, Smac finds no valid path to the
+       exact home pose and the mission fails on the first attempt. Fixes (v2 only):
+       `home_approach_radius_m` (0.5) returns to the nearest known-free cell with 0.5 m
+       obstacle clearance when home is closer than that to a mapped obstacle; `nav2_v2.yaml`
+       `xy_goal_tolerance` 0.65 → 0.35 so that a return success still lands within the
+       manager's 0.9 m `home_reached_radius_m` (≤ 0.85 m).
+     - Seed 411 explore, fourth attempt (`a789ef5b`): 8 of 16 explore goals failed with the
+       0.35 tolerance on every goal (the 0.65 attempt failed 3 of 26), and at 835 sim-s the
+       publisher hit its 2 GiB archive quota: each `projections.jsonl` record carried the
+       whole 60 s association list (~270 KB). Map reset was then refused, the restart budget
+       ran out and the mission failed `localization_fault` (coverage 0.29, 0 contacts). Fixes:
+       - without the raw archive, projection records keep `association_count` instead of the
+         list (nothing can be replayed without `native.bin`), cutting JSON work on the
+         callback thread too;
+       - two goal checkers: `general_goal_checker` 0.65 (legacy) for every goal and
+         `precise_goal_checker` 0.35 for `return_home` only, through BTs that name the
+         checker (`behavior_trees/navigate_to_pose_v2*.xml`, `navigate_through_poses_v2.xml`)
+         and the manager's `return_behavior_tree`. The first try copied Jazzy's stock BTs, but
+         phase3 overrides the BT with `navigate_to_pose_lunar_recovery.xml`, so every goal
+         failed at once (`FollowPath` with no checker; run `f9a1e6ec`). The lunar BT now names
+         `general_goal_checker` (legacy configs' only checker) and
+         `navigate_to_pose_lunar_recovery_precise.xml` is the return tree.
+     - Seed 7 explore, third attempt (interim config, stopped at ~63 min): a `map_stale` hold
+       mid-mission. The supervisor's `_map` cleared the last fresh map time on any rejected
+       message, so one map older than 0.75 sim-s on arrival (a publisher load spike) read as
+       stale and restarted GLIM. On the restart the publisher faulted its freshly reset core
+       with `multiple v2 input authorities` (old and new GLIM both briefly in discovery), so
+       the rebuild hit `restart_timeout`. Fixes: `_map` keeps the newest valid map stamp (a
+       rejected message only clears `map_ready`); in nav a second revisions publisher is
+       tolerated for 10 s (`DUPLICATE_AUTHORITY_GRACE_S`), as only the reset epoch is
+       accepted, and still faults if it persists.
+     - Seed 411 explore, final config (`9eee12ee`): clean mission (39 goals, 3 failed,
+       `coverage_goal_met`, home 0.23 m, 0 contacts, no faults), but GT coverage 0.692 vs the
+       manager's 0.712: again one corner-clipped cell (36 vs 37 of 52) at the stop, now with
+       both grids anchored at the spawn. The online count marked a cell on any pose inside
+       it, so SLAM poses a few cm from GT decide edge cells. Fix: `mission_visit_margin_m`
+       (v2 gates 0.15 m, above SLAM p95 6-10 cm) counts a cell only when the pose is that far
+       inside it, so the online estimate reads at or below GT; the 0.70 stop is unchanged.
+     - Seed 42 explore, final config with the visit margin (`b6f88195`): **PASS**. GT coverage
+       0.769 (online 0.712, now below GT as intended), home 0.43 m, 0 contacts.
+     - Seed 411 explore, same config (`3b95aef9`): **safety failure**, 701 GT contact samples
+       with `instance_0` (0.34 m). After the explore goals around (34, 37) failed, reveal goal 24
+       (north) started with the rover facing south; MPPI (`vx_min` -0.05) reversed while
+       turning and backed 0.4 m into the rock, then every recovery reported `Collision Ahead`
+       and the return failed. The rock was in the global mosaic (lethal since t = 142 s) but
+       not in MPPI's local costmap: that was the live v2 window, which drops an obstacle 60 s
+       after its last observation, and the front LiDAR never sees behind the rover, so the rock
+       had decayed to freed-unknown (cost 70). Fix: in nav the published
+       `/terrain_shadow/planner_costmap` is the mosaic cropped to the window
+       (`GlobalStitch.window`): current observations as before, earlier observations
+       remembered, policy only where nothing was ever observed. (Merging the mosaic as a second
+       Nav2 StaticLayer was rejected: in a rolling window its `use_maximum` merge is, as far as I
+       recall the Jazzy source, a plain max in which unknown (255) beats lethal.)
+     - Seed 7 explore, final4 attempt (`6bb47eb5`): aborted by a bash syntax error. I rewrote
+       `v2_gate_run.sh` in place while it was running (bash reads scripts incrementally); scripts
+       are now replaced atomically.
+     - Seed 411 explore with the mosaic-backed local window (`9da61594`): **PASS**. GT
+       coverage 0.788 (online 0.712), home 0.31 m, 0 contacts, 980 sim-s.
+     - Seed 7 explore, final config (`a0cb8c50`): **PASS**. GT coverage 0.731 (online 0.712),
+       home 0.69 m via the home approach (goal moved 0.36 m off the spawn rock), 0 avoidable
+       contacts (2,041 samples on the spawn rock reported apart).
+     - **Gate summary (final code, v2 stack, legacy mission parameters): 6/6 PASS.**
+
+       | Gate | Run | Date | Result | Key numbers |
+       |---|---|---|---|---|
+       | 42 explore | `6df0bdb9` | Oct 29 | PASS | GT cov 0.769 (online 0.712), home 0.55 m |
+       | 411 explore | `9da61594` | Oct 28 | PASS | GT cov 0.788, home 0.31 m |
+       | 7 explore | `a0cb8c50` | Oct 28 | PASS | GT cov 0.731, home 0.69 m |
+       | 42 sample_return | `554286f9` | Oct 29 | PASS | sample 0.758, home 0.44 m |
+       | 411 sample_return | `2f9cfff7` | Oct 29 | PASS | sample 0.756, home 0.38 m |
+       | 7 sample_return | `f1dab517` | Oct 29 | PASS | sample 0.777, home 0.79 m (2,629 spawn-rock samples apart) |
+
+       All six with 0 avoidable GT contacts at >= 0.10 m, one code version (the Oct 29 runs
+       differ only by the nav-run archive reserve below, which does not touch behaviour).
+       Sample values just above 0.75 are the stop rule, not a margin: the manager returns home
+       at the first sample >= `sample_success_threshold` 0.75. Superseded earlier passes on
+       interim configs: 42 explore `b6f88195`, sample_return `a2a9bc08`, `050fad92`, `4c1f4219`.
+     - Archive reserve (Oct 29): nav runs write MBs (no raw archive), but the default 50 GiB
+       free-space reserve refused every allocation once other data on the disk left 41 GiB.
+       The three nav-only allocations (gate run, sim nav stream, nav publisher) now keep a
+       20 GiB reserve; capture paths keep the default.
+     - Gates after these fixes are re-run on the final code (`tools/v2_gate_run.sh`, same
+       mission parameters); earlier attempts above are kept as failed artifacts.
+   - Not yet run: the T2 audit-suite replay (needs `terrain_archive_raw:=true`); T4/T5 below.
 
 Then re-run the 42/411/7 gates with Nav2.
 

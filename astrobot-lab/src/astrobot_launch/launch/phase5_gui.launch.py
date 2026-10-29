@@ -14,6 +14,8 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("robot_namespace", default_value="astrobot_0"),
             DeclareLaunchArgument("host", default_value="0.0.0.0"),
             DeclareLaunchArgument("port", default_value="8080"),
+            # v2 stack: /terrain_shadow/global_costmap
+            DeclareLaunchArgument("obstacle_map_topic", default_value="slam/bev_costmap"),
             LogInfo(
                 msg=(
                     "Starting Phase 5 UI backend only. Run the frontend from "
@@ -26,6 +28,7 @@ def generate_launch_description() -> LaunchDescription:
                 executable="ui_backend",
                 name="ui_backend",
                 output="screen",
+                parameters=[{"obstacle_map_topic": LaunchConfiguration("obstacle_map_topic")}],
                 arguments=[
                     "--host",
                     host,

@@ -85,8 +85,15 @@ ARGS=(
 
 # The explicit-ray adapter consumes every physics acquisition tick. This is an
 # opt-in experiment, not a change to historical 30 Hz rendering protocols.
+# Nav runs (OMNILRS_SELECTED_NAV, docker-compose.selected-nav.yml) stream the same sensor
+# without a capture; the sim never drives there, Nav2 does.
 if [[ "${OMNILRS_SELECTED_LIDAR:-false}" == "true" ]]; then
-  if [[ "${OMNILRS_NATURAL_HOLDOUT:-false}" != "true" || -z "${OMNILRS_NATURAL_MOTION:-}" ]]; then
+  if [[ "${OMNILRS_SELECTED_NAV:-false}" == "true" ]]; then
+    if [[ "${OMNILRS_NATURAL_HOLDOUT:-false}" == "true" ]]; then
+      echo "Selected nav stream and natural holdout are exclusive." >&2
+      exit 2
+    fi
+  elif [[ "${OMNILRS_NATURAL_HOLDOUT:-false}" != "true" || -z "${OMNILRS_NATURAL_MOTION:-}" ]]; then
     echo "Selected LiDAR requires guarded natural motion." >&2
     exit 2
   fi

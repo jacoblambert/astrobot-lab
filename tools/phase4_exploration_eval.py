@@ -59,7 +59,11 @@ class Phase4ExplorationEval(Node):
         self.gt_validator = PoseValidator()
         self.reference_faults = []
         self.last_gt_received_at = None
-        self.physical_coverage = FixedCoverage(args.home_x, args.home_y, args.coverage_radius, args.coverage_cell_size)
+        # The nominal home is kept for comparison with legacy gates; with --home-from-gt-start the
+        # scored geometry is anchored at the first valid GT pose, as the manager anchors its own.
+        self.nominal_coverage = FixedCoverage(args.home_x, args.home_y, args.coverage_radius, args.coverage_cell_size)
+        self.home = None if getattr(args, "home_from_gt_start", False) else (args.home_x, args.home_y)
+        self.physical_coverage = None if self.home is None else self.nominal_coverage
         self.latest_slam_pose = None
         self.latest_status = {}
         self.best_sample = 0.0
@@ -146,8 +150,11 @@ class Phase4ExplorationEval(Node):
         if self.args.record_dir:
             self.gt_ts.append(row)
         sample = PoseSample(row[0], tuple(row[1:4]), tuple(row[4:8]))
+        now = self.get_clock().now().nanoseconds * 1e-9
+        if now <= 0 and msg.header.frame_id == "gt_map":
+            return  # no /clock yet: a valid pose would read as a future stamp (seed-7 gate, Oct 27)
         reason = ("wrong_frame" if msg.header.frame_id != "gt_map" else
-                  self.gt_validator.validate(sample, self.get_clock().now().nanoseconds * 1e-9))
+                  self.gt_validator.validate(sample, now))
         if reason:
             self.reference_faults.append({"stamp": row[0], "reason": reason})
             return
@@ -155,7 +162,12 @@ class Phase4ExplorationEval(Node):
         yaw = yaw_from_quaternion(msg.pose.orientation)
         self.latest_gt_pose = [msg.pose.position.x, msg.pose.position.y, yaw]
         self.last_gt_received_at = time.monotonic()
+        if self.home is None:
+            self.home = (msg.pose.position.x, msg.pose.position.y)
+            self.physical_coverage = FixedCoverage(*self.home, self.args.coverage_radius, self.args.coverage_cell_size)
         self.physical_coverage.observe(msg.pose.position.x, msg.pose.position.y)
+        if self.nominal_coverage is not self.physical_coverage:
+            self.nominal_coverage.observe(msg.pose.position.x, msg.pose.position.y)
         if self.active_goal_record is not None and previous is not None:
             record = self.active_goal_record
             record["executed_length_m"] = record.get("executed_length_m", 0.0) + math.hypot(
@@ -549,13 +561,14 @@ class Phase4ExplorationEval(Node):
         status = self.latest_status or {}
         gt = self.latest_gt_pose
         home_dist = (
-            math.hypot(gt[0] - self.args.home_x, gt[1] - self.args.home_y)
-            if gt is not None
+            math.hypot(gt[0] - self.home[0], gt[1] - self.home[1])
+            if gt is not None and self.home is not None
             else None
         )
         reference_valid = (not self.reference_faults and self.clock_fault is None and self.last_gt_received_at is not None
                            and time.monotonic() - self.last_gt_received_at <= 1.0)
-        result = mission_verdict(mode, status, home_dist, self.physical_coverage.fraction, self.best_sample,
+        coverage = self.physical_coverage.fraction if self.physical_coverage is not None else 0.0
+        result = mission_verdict(mode, status, home_dist, coverage, self.best_sample,
                                  self.args.home_tol, self.args.coverage_gate, self.args.sample_gate, reference_valid)
         result["reference_faults"] = self.reference_faults
         result["clock_fault"] = self.clock_fault
@@ -564,6 +577,10 @@ class Phase4ExplorationEval(Node):
             result["reasons"].append("localization_fault_observed")
             result["pass"] = False
         result["metrics"]["online_coverage_fraction"] = status.get("mission_coverage_fraction")
+        result["metrics"]["home_xy"] = list(self.home) if self.home is not None else None
+        result["metrics"]["nominal_home_coverage_fraction"] = self.nominal_coverage.fraction
+        result["metrics"]["nominal_home_distance_m"] = (
+            math.hypot(gt[0] - self.args.home_x, gt[1] - self.args.home_y) if gt is not None else None)
         return result
 
     def write_resource_compare(self, output: str) -> None:
@@ -623,6 +640,8 @@ def main() -> None:
     parser.add_argument("--mission-mode", default="", choices=["", "explore_radius", "sample_return"])
     parser.add_argument("--home-x", type=float, default=20.0)
     parser.add_argument("--home-y", type=float, default=18.0)
+    parser.add_argument("--home-from-gt-start", action="store_true",
+                        help="score coverage and home distance about the rover's first GT pose, not --home-x/y")
     parser.add_argument("--coverage-gate", type=float, default=0.70)
     parser.add_argument("--coverage-radius", type=float, default=8.0)
     parser.add_argument("--coverage-cell-size", type=float, default=2.0)

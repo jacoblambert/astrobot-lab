@@ -43,6 +43,9 @@ class LocalConfig:
     evidence_lifetime_s: int | None = None
     allow_bookkeeping: bool = False
     max_bookkeeping_frames: int = 8192
+    # Live navigation stream: a dropped or late chunk is skipped and counted, and stale input
+    # pauses projection (the supervisor's map freshness gate owns outages). Captures stay strict.
+    tolerate_stream_gaps: bool = False
 
     def __post_init__(self):
         if type(self.window_s) is not int or self.window_s not in (2, 5, 30):
@@ -107,6 +110,7 @@ class LocalReconstructor:
         self.last_result = None
         self.last_record = None
         self.received = self.projected = 0
+        self.skipped_sequences = self.late_chunks = 0
         self.completion = None
         self.completed = False
         self.persistent_mapper = None
@@ -229,6 +233,15 @@ class LocalReconstructor:
                 self.timeline.frames.pop(key)
                 self.timeline.stamps.pop(stamp)
 
+    def resume_after(self, capture, sequence):
+        """Join a running native stream (nav map reset): the next chunk is sequence + 1."""
+        self._check()
+        if self.capture is not None or self.received:
+            raise ValueError("stream already joined")
+        if not isinstance(capture, str) or not capture:
+            raise ValueError("invalid capture identity")
+        self.capture, self.sequence = capture, integer(sequence, "sequence")
+
     def chunk(self, chunk, arrival_ns):
         self._check()
         try:
@@ -240,13 +253,22 @@ class LocalReconstructor:
                 raise ValueError("invalid capture identity")
             if self.capture is None:
                 self.capture = capture
+            tolerant = self.config.tolerate_stream_gaps
             if (
                 capture != self.capture
-                or sequence != self.sequence + 1
+                or sequence <= self.sequence
+                or not tolerant and sequence != self.sequence + 1
                 or stamp <= self.last_input_ns
-                or stamp <= self.watermark_ns
                 or self.completion is not None
             ):
+                raise ValueError("native identity/sequence/stamp discontinuity")
+            late = stamp <= self.watermark_ns or arrival_ns > stamp + DELAY_NS
+            if tolerant and late:
+                self.skipped_sequences += sequence - self.sequence - 1
+                self.late_chunks += 1
+                self.sequence = sequence
+                return
+            if stamp <= self.watermark_ns:
                 raise ValueError("native identity/sequence/stamp discontinuity")
             if not stamp <= arrival_ns <= stamp + DELAY_NS:
                 raise ValueError("native acquisition deadline exceeded")
@@ -262,6 +284,7 @@ class LocalReconstructor:
             points.flags.writeable = False
             self.observations.append((stamp, sequence, points))
             self.bytes += points.nbytes
+            self.skipped_sequences += sequence - self.sequence - 1
             self.sequence, self.last_input_ns = sequence, stamp
             self.received += 1
         except BaseException as exc:
@@ -301,6 +324,8 @@ class LocalReconstructor:
             if self.completed or self.capture is None:
                 return None
             if now_ns - self.last_input_ns > DELAY_NS and self.completion is None:
+                if self.config.tolerate_stream_gaps:
+                    return None
                 raise ValueError("native input stale")
             target = (now_ns - DELAY_NS) // PERIOD_NS * PERIOD_NS
             if target <= self.watermark_ns or target < 0 or target < self.observations[0][0]:
@@ -479,6 +504,8 @@ class LocalReconstructor:
             retained_bytes=self.bytes,
             received=self.received,
             projected=self.projected,
+            skipped_sequences=self.skipped_sequences,
+            late_chunks=self.late_chunks,
             evidence_ns=self.watermark_ns,
             navigation_authority=False,
             acceptance=False,

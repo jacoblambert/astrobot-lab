@@ -303,3 +303,37 @@ def _pose_at(t, x=0., z=0.):
     msg.header.stamp.sec, msg.header.stamp.nanosec = int(t), int(round((t % 1) * 1e9))
     msg.pose.position.z = float(z)
     return msg
+
+
+
+def test_map_topic_defaults_to_legacy_bev_and_is_configurable():
+    from rclpy.parameter import Parameter
+
+    rclpy.init()
+    try:
+        legacy = LocalizationSupervisor()
+        assert legacy.map_topic == "slam/bev_costmap"
+        assert legacy.get_subscriptions_info_by_topic("/slam/bev_costmap")
+        legacy.destroy_node()
+        v2 = LocalizationSupervisor(parameter_overrides=[Parameter("map_topic", value="/terrain_shadow/planner_costmap")])
+        assert v2.map_topic == "/terrain_shadow/planner_costmap"
+        assert v2.get_subscriptions_info_by_topic("/terrain_shadow/planner_costmap")
+        v2.destroy_node()
+    finally:
+        rclpy.shutdown()
+
+
+def test_one_late_map_message_does_not_erase_the_last_fresh_map(supervisor):
+    node = supervisor
+    node.last_pose = pose(x=5)
+    msg = OccupancyGrid()
+    msg.header.frame_id = "map"
+    msg.header.stamp.sec = 10
+    msg.info.resolution = .1
+    msg.info.width, msg.info.height = 100, 20
+    msg.data = array('b', [0]*2000)
+    node._map(msg)
+    assert node.map_ready and node.map_stamp == 10
+    msg.header.stamp.sec = 8  # 2 s old on arrival: rejected, but the 10 s map still counts
+    node._map(msg)
+    assert not node.map_ready and node.map_stamp == 10
