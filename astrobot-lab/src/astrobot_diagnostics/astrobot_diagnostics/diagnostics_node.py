@@ -28,6 +28,15 @@ def yaw_from_quaternion(q: Any) -> float:
     return math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 
 
+# slam/pose_corrected is GLIM's IMU pose: offset and pi-rotated from base_link (as
+# slam_map_to_odom_tf_node, the exploration manager and the UI backend). GT is base_link, so
+# comparing the raw IMU pose put the lever arm into the error (up to ~0.5 m after a turn) and
+# into the per-step increments (an in-place turn sweeps the IMU along an arc).
+IMU_BASE_X = 0.264
+IMU_BASE_Y = 0.017
+IMU_BASE_YAW = math.pi
+
+
 def transform_xy(x: float, y: float, tx: float, ty: float, yaw: float) -> tuple[float, float]:
     c = math.cos(yaw)
     s = math.sin(yaw)
@@ -178,11 +187,18 @@ class DiagnosticsNode(Node):
     def _pose_tuple(msg: PoseStamped) -> Pose2D:
         return Pose2D(float(msg.pose.position.x), float(msg.pose.position.y), yaw_from_quaternion(msg.pose.orientation))
 
+    @classmethod
+    def _slam_base_tuple(cls, msg: PoseStamped) -> Pose2D:
+        imu = cls._pose_tuple(msg)
+        c, s = math.cos(imu.yaw), math.sin(imu.yaw)
+        return Pose2D(imu.x + c * IMU_BASE_X - s * IMU_BASE_Y, imu.y + s * IMU_BASE_X + c * IMU_BASE_Y,
+                      math.atan2(math.sin(imu.yaw + IMU_BASE_YAW), math.cos(imu.yaw + IMU_BASE_YAW)))
+
     def _maybe_lock_alignment(self) -> None:
         if self.initial_gt_to_map is not None or self.gt_pose is None or self.slam_pose is None:
             return
         gt = self._pose_tuple(self.gt_pose)
-        slam = self._pose_tuple(self.slam_pose)
+        slam = self._slam_base_tuple(self.slam_pose)
         yaw = self.alignment_yaw
         if self.alignment_yaw_mode == "pose":
             yaw = math.atan2(math.sin(slam.yaw - gt.yaw), math.cos(slam.yaw - gt.yaw))
@@ -223,7 +239,7 @@ class DiagnosticsNode(Node):
         }
         if self.gt_pose is not None and self.slam_pose is not None and self.initial_gt_to_map is not None:
             gt = self._pose_tuple(self.gt_pose)
-            slam = self._pose_tuple(self.slam_pose)
+            slam = self._slam_base_tuple(self.slam_pose)
             pred_x, pred_y = transform_xy(gt.x, gt.y, *self.initial_gt_to_map)
             output["slam_vs_gt"] = {
                 "position_error_m": math.hypot(pred_x - slam.x, pred_y - slam.y),

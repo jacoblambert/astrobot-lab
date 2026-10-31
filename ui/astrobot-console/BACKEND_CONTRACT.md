@@ -15,7 +15,40 @@ The frontend consumes `astrobot.console.v1` from `WS /ws/telemetry` and `GET /ap
 - `topics`: topic freshness and estimated rate, keyed by backend topic key.
 - `events`: latest compact status/warning/critical events.
 
-## Initial live layers
+## Optional fields (newer backends)
+
+- `stack`: `legacy` or `v2` (`phase5_gui.launch.py stack:=...`).
+- `simTime`, `simSpeed`: sim clock seconds and sim seconds per wall second.
+- `rateSeries`: the `series` names to show as topic rates, in order. Rates are arrivals per sim second
+  over the last 10 sim seconds, sampled once per wall second (`topics[].hz` uses the same window).
+- `localization`: `{state, motionPermitted, reason, epoch, stamp}` from `localization/status` (v2).
+- `terrain`: `{valid, failure, epoch, received, projected, skippedSequences, lateChunks, evidenceLagSec, peakRssMib, stamp}`
+  from `/terrain_shadow/status` (v2).
+- `dds`: `{domain, rmw}`.
+- `robots[].footprint` `{halfLength, halfWidth}`; `robots[].gtPose` and `gtTrajectory`: ground truth in
+  the display map frame (evaluator overlay; v2 uses the exact RTK-home transform map = world + (20, 20)).
+  `trajectory` and `gtTrajectory` keep a point per 0.1 m of travel (newest pose last, up to 3000).
+- `robots[].candidates`: `[{x, y}]` the exploration manager's ranked goal candidates (best first,
+  `exploration/frontiers`).
+- `gtRocks`: `[{x0, y0, x1, y1}]` rock footprints (world bounds, display map frame) from the sim's
+  evaluator scene inventory (`gt_scene_path`, the gate's contact reference); empty when not given.
+- `mission.details.home_x`, `home_y`, `home_radius_m`: the mission disc (exploration manager status).
+- Downsampled grids (over `max_cells`) are block max-pooled, so small obstacles survive.
+- `mission.elapsedSec`: mission sim time once the manager's events give its start.
+- `events`: current status events, then the recent event log (newest first).
+- WebSocket frames carry only map layers that changed since the last frame sent to that client.
+
+## v2 layers (`stack:=v2`)
+
+- `maps.obstacle`: `/terrain_shadow/global_costmap` (Nav2 costs on the persistent mosaic)
+- `maps.explore`: `/terrain_shadow/exploration_map` (0 free, 100 occupied, -1 unknown)
+- `maps.local`: `/terrain_shadow/planner_costmap` (the window Nav2's local costmap reads)
+- `maps.mission`, `maps.water`, `maps.gt`: as below.
+
+Rates come from small topics only (raw subscriptions, `imu_physics`, the costmaps, SLAM pose; native
+chunk rate from the terrain status counter): the console never subscribes to point clouds.
+
+## Initial live layers (legacy)
 
 - `maps.obstacle`: `/astrobot_0/slam/bev_costmap`
 - `maps.mission`: `/astrobot_0/exploration/mission_grid`

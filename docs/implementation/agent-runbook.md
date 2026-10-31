@@ -319,6 +319,12 @@ Options and gotchas:
   Contacts with rocks already under the spawn body are reported as `spawn_rock_contacts`.
   Nav runs allocate with a 20 GiB free-space reserve (gate run, sim nav stream, nav
   publisher `archive_reserve_gib`); a run writes MBs. Captures keep the 50 GiB default.
+- **Demo / review session:** `tools/v2_demo.sh <seed> <explore_radius|sample_return|teleop_click> [--eval] [--camera]`
+  runs the gated mission configuration (`tools/v2_mission_env.sh`, shared with the gate) plus the Ops
+  console backend (`phase5_gui.launch.py stack:=v2`, GT rocks from the run's `natural_scene.json`) until
+  Ctrl-C (sim stop + rm). `--camera` renders the sim front camera (gates keep it off). Frontend on the host:
+  `ASTROBOT_BACKEND=http://<dev container IP>:8080 npm run dev` in `ui/astrobot-console`. The console
+  is an extra process: never use a demo run as a gate result.
 - **Archive reconnects:** if `/archive` gives EIO inside `astrobot-selected-dev` while the
   host mount works, the container holds a stale bind; `docker restart astrobot-selected-dev`
   (idle) re-binds it.

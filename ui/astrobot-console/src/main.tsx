@@ -1,16 +1,29 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { GridMap, RobotState, Severity, TelemetryFrame } from "./types";
+import type { Footprint, GridMap, GtRock, Pose2D, RobotState, Severity, TelemetryFrame } from "./types";
 import { makeMockTelemetry, MOCK_FLEET_EXTRA, type FleetEntry, type MockScenario } from "./mockTelemetry";
 import "./styles.css";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
+const LAYER_ORDER = ["obstacle", "explore", "local", "mission", "water", "gt"];
+
 const LAYER_LABELS: Record<string, string> = {
-  obstacle: "Obstacle",
-  water: "Water",
+  obstacle: "Cost",
+  explore: "Explored",
+  local: "Local",
   mission: "Grid",
+  water: "Water",
   gt: "GT",
+};
+
+const LAYER_TITLES: Record<string, string> = {
+  obstacle: "Nav2 cost map",
+  explore: "Explored terrain",
+  local: "Local planner window",
+  mission: "Mission grid",
+  water: "Water (GT)",
+  gt: "GT obstacles",
 };
 
 const DUMMY_CAM_TOPICS = [
@@ -66,45 +79,222 @@ function formatNow(d: Date) {
   };
 }
 
-function worldToCanvas(map: GridMap, x: number, y: number, w: number, h: number): [number, number] {
-  const dx = x - map.origin.x;
-  const dy = y - map.origin.y;
-  const cos = Math.cos(map.origin.yaw);
-  const sin = Math.sin(map.origin.yaw);
-  const lx = cos * dx + sin * dy;
-  const ly = -sin * dx + cos * dy;
-  return [(lx / (map.resolution * map.width)) * w, h - (ly / (map.resolution * map.height)) * h];
+// ── Map view ─────────────────────────────────────────────────────────────────
+
+/** Initial display from the URL, for bookmarkable demo views: ?layer=explore&view=follow&rocks=1&gt=1 */
+const URL_PARAMS = new URLSearchParams(window.location.search);
+
+/** A square world window on the canvas: centre (cx, cy) in map metres, `scale` px per metre. */
+interface View {
+  cx: number;
+  cy: number;
+  scale: number;
+  W: number;
+  H: number;
 }
 
-function canvasToWorld(map: GridMap, px: number, py: number, w: number, h: number): [number, number] {
-  const spanX = map.resolution * map.width;
-  const spanY = map.resolution * map.height;
-  const lx = (px / w) * spanX;
-  const ly = (1 - py / h) * spanY;
-  const cos = Math.cos(map.origin.yaw);
-  const sin = Math.sin(map.origin.yaw);
-  const dx = cos * lx - sin * ly;
-  const dy = sin * lx + cos * ly;
-  return [map.origin.x + dx, map.origin.y + dy];
+const FOLLOW_SPAN_M = 14;
+
+function worldToCanvas(v: View, x: number, y: number): [number, number] {
+  return [v.W / 2 + (x - v.cx) * v.scale, v.H / 2 - (y - v.cy) * v.scale];
 }
 
-function colorForCell(value: number, layer: string): string {
-  if (value < 0) return "rgba(10,18,28,0.7)";
-  const v = Math.max(0, Math.min(100, value)) / 100;
-  if (layer === "water") {
-    return `rgba(${Math.round(30 + v * 50)}, ${Math.round(120 + v * 115)}, ${Math.round(200 + v * 55)}, ${0.06 + v * 0.82})`;
+function canvasToWorld(v: View, px: number, py: number): [number, number] {
+  return [v.cx + (px - v.W / 2) / v.scale, v.cy - (py - v.H / 2) / v.scale];
+}
+
+function mapBounds(map: GridMap): { x0: number; y0: number; x1: number; y1: number } {
+  const w = map.width * map.resolution;
+  const h = map.height * map.resolution;
+  const c = Math.cos(map.origin.yaw);
+  const s = Math.sin(map.origin.yaw);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (const [lx, ly] of [[0, 0], [w, 0], [0, h], [w, h]]) {
+    xs.push(map.origin.x + c * lx - s * ly);
+    ys.push(map.origin.y + s * lx + c * ly);
   }
-  if (layer === "mission") {
-    return v > 0.6 ? "rgba(94,234,212,0.30)" : v > 0.3 ? "rgba(96,165,250,0.18)" : "rgba(42,65,90,0.30)";
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
+
+type RGBA = [number, number, number, number];
+
+function rgbaForCell(value: number, layer: string): RGBA {
+  if (layer === "gt-overlay") return value >= 50 ? [244, 114, 182, 150] : [0, 0, 0, 0];
+  if (value < 0) return [10, 18, 28, 170];
+  const v = Math.min(100, value) / 100;
+  switch (layer) {
+    case "water":
+      return [30 + v * 50, 120 + v * 115, 200 + v * 55, (0.06 + v * 0.82) * 255];
+    case "mission":
+      return v > 0.6 ? [94, 234, 212, 77] : v > 0.3 ? [96, 165, 250, 46] : [42, 65, 90, 77];
+    case "gt":
+      return [160 + v * 60, 20 + v * 60, 200 + v * 30, (0.06 + v * 0.72) * 255];
+    case "explore":
+      // observed classes: 0 free, 100 occupied (no costs or inflation)
+      return value >= 50 ? [251, 191, 36, 235] : [38, 92, 104, 150];
+    default:
+      // obstacle / local: Nav2 costs, dark slate → purple → magenta (100 = lethal)
+      return [60 + v * 168, 40 + v * 57, 100 + v * 149, (0.12 + v * 0.78) * 255];
   }
-  if (layer === "gt") {
-    return `rgba(${Math.round(160 + v * 60)}, ${Math.round(20 + v * 60)}, ${Math.round(200 + v * 30)}, ${0.06 + v * 0.72})`;
+}
+
+const gridImages = new WeakMap<GridMap, Map<string, HTMLCanvasElement>>();
+
+/** The grid as a 1 px-per-cell image (row 0, the lowest world y, at the bottom), cached per map frame. */
+function gridImage(map: GridMap, layer: string): HTMLCanvasElement {
+  let byLayer = gridImages.get(map);
+  if (!byLayer) {
+    byLayer = new Map();
+    gridImages.set(map, byLayer);
   }
-  // obstacle: dark slate → purple → magenta
-  const r = Math.round(60  + v * 168);
-  const g = Math.round(40  + v * 57);
-  const b = Math.round(100 + v * 149);
-  return `rgba(${r},${g},${b},${0.12 + v * 0.78})`;
+  const cached = byLayer.get(layer);
+  if (cached) return cached;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, map.width);
+  canvas.height = Math.max(1, map.height);
+  const ctx = canvas.getContext("2d")!;
+  const image = ctx.createImageData(canvas.width, canvas.height);
+  const px = image.data;
+  for (let row = 0; row < map.height; row++) {
+    const out = (map.height - 1 - row) * map.width;
+    for (let col = 0; col < map.width; col++) {
+      const [r, g, b, a] = rgbaForCell(map.data[row * map.width + col] ?? -1, layer);
+      const i = (out + col) * 4;
+      px[i] = r;
+      px[i + 1] = g;
+      px[i + 2] = b;
+      px[i + 3] = a;
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  byLayer.set(layer, canvas);
+  return canvas;
+}
+
+function drawGrid(ctx: CanvasRenderingContext2D, v: View, map: GridMap, image: HTMLCanvasElement) {
+  const [ox, oy] = worldToCanvas(v, map.origin.x, map.origin.y);
+  const s = v.scale * map.resolution;
+  ctx.save();
+  ctx.translate(ox, oy);
+  ctx.rotate(-map.origin.yaw);
+  ctx.scale(s, s);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(image, 0, -map.height);
+  ctx.restore();
+}
+
+function drawPolyline(ctx: CanvasRenderingContext2D, v: View, points: Pose2D[], color: string, width: number, dash: number[]) {
+  if (points.length < 2) return;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.setLineDash(dash);
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const [x, y] = worldToCanvas(v, p.x, p.y);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+/** GT rocks as ellipses inscribed in their world bounds (rocks are roughly round). */
+function drawGtRocks(ctx: CanvasRenderingContext2D, v: View, rocks: GtRock[]) {
+  ctx.fillStyle = "rgba(244,114,182,0.28)";
+  ctx.strokeStyle = "rgba(244,114,182,0.95)";
+  ctx.lineWidth = 1.25;
+  for (const r of rocks) {
+    const [cx, cy] = worldToCanvas(v, (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2);
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, Math.max(1.5, ((r.x1 - r.x0) / 2) * v.scale), Math.max(1.5, ((r.y1 - r.y0) / 2) * v.scale), 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+/** Ranked goal candidates: the next goal is #1; the top few are numbered. */
+function drawCandidates(ctx: CanvasRenderingContext2D, v: View, candidates: Array<{ x: number; y: number }>) {
+  ctx.font = "9px 'JetBrains Mono', monospace";
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const [x, y] = worldToCanvas(v, candidates[i].x, candidates[i].y);
+    const top = i < 5;
+    ctx.fillStyle = top ? "rgba(147,197,253,0.95)" : "rgba(147,197,253,0.4)";
+    ctx.beginPath();
+    ctx.arc(x, y, top ? 3.5 : 2, 0, Math.PI * 2);
+    ctx.fill();
+    if (top) ctx.fillText(String(i + 1), x + 5, y - 4);
+  }
+}
+
+/** The explore_radius mission disc: coverage counts the 2 m grid cells inside it. */
+function drawMissionRadius(ctx: CanvasRenderingContext2D, v: View, x: number, y: number, radius: number) {
+  const [cx, cy] = worldToCanvas(v, x, y);
+  ctx.strokeStyle = "rgba(147,197,253,0.5)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([6, 5]);
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius * v.scale, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "rgba(147,197,253,0.75)";
+  ctx.font = "9px 'JetBrains Mono', monospace";
+  ctx.fillText(`mission radius ${radius.toFixed(0)} m`, cx + 4, cy - radius * v.scale - 4);
+}
+
+/** The rover body at true scale (never below a legible marker), with a heading wedge. */
+function drawRover(ctx: CanvasRenderingContext2D, v: View, pose: Pose2D, fp: Footprint, ghost: boolean) {
+  const [rx, ry] = worldToCanvas(v, pose.x, pose.y);
+  const grow = Math.max(1, 9 / (fp.halfLength * v.scale));
+  const hl = fp.halfLength * v.scale * grow;
+  const hw = fp.halfWidth * v.scale * grow;
+  ctx.save();
+  ctx.translate(rx, ry);
+  ctx.rotate(-pose.yaw);
+  if (ghost) {
+    ctx.strokeStyle = "rgba(251,191,36,0.95)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.strokeRect(-hl, -hw, 2 * hl, 2 * hw);
+    ctx.setLineDash([]);
+  } else {
+    ctx.fillStyle = "rgba(5,10,18,0.55)";
+    ctx.strokeStyle = "#5eead4";
+    ctx.lineWidth = 1.75;
+    ctx.fillRect(-hl, -hw, 2 * hl, 2 * hw);
+    ctx.strokeRect(-hl, -hw, 2 * hl, 2 * hw);
+    ctx.fillStyle = "#5eead4";
+    ctx.beginPath();
+    ctx.moveTo(hl, 0);
+    ctx.lineTo(hl * 0.35, -hw * 0.6);
+    ctx.lineTo(hl * 0.5, 0);
+    ctx.lineTo(hl * 0.35, hw * 0.6);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** Metric grid lines at a step that stays readable at the current zoom. */
+function drawMetricGrid(ctx: CanvasRenderingContext2D, v: View) {
+  const span = Math.max(v.W, v.H) / v.scale;
+  const step = span > 40 ? 10 : span > 16 ? 5 : span > 6 ? 1 : 0.5;
+  const [x0, y1] = canvasToWorld(v, 0, 0);
+  const [x1, y0] = canvasToWorld(v, v.W, v.H);
+  ctx.strokeStyle = "rgba(94,234,212,0.08)";
+  ctx.lineWidth = 0.5;
+  for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) {
+    const [px] = worldToCanvas(v, x, 0);
+    ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, v.H); ctx.stroke();
+  }
+  for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) {
+    const [, py] = worldToCanvas(v, 0, y);
+    ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(v.W, py); ctx.stroke();
+  }
+}
+
+function niceScaleMeters(scale: number): number {
+  for (const m of [0.5, 1, 2, 5, 10, 20, 50]) if (m * scale >= 50) return m;
+  return 100;
 }
 
 // ── useTelemetry ─────────────────────────────────────────────────────────────
@@ -119,13 +309,23 @@ function useTelemetry(scenario: MockScenario): TelemetryFrame {
   useEffect(() => {
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     const socket = new WebSocket(`${proto}://${window.location.host}/ws/telemetry`);
+    // A socket this effect closed itself (re-render, StrictMode) must not flip the view to mock.
+    let disposed = false;
     socket.onmessage = (ev) => {
+      if (disposed) return;
       const parsed = JSON.parse(ev.data) as TelemetryFrame;
-      setFrame((prev) => ({ ...parsed, maps: { ...prev.maps, ...parsed.maps } }));
+      setFrame((prev) => ({ ...parsed, maps: { ...(prev.connected ? prev.maps : {}), ...parsed.maps } }));
     };
-    socket.onerror = () => setFrame({ ...makeMockTelemetry(scenario), connected: false });
-    socket.onclose = () => setFrame((prev) => (prev.connected ? { ...prev, connected: false } : prev));
-    return () => socket.close();
+    socket.onerror = () => {
+      if (!disposed) setFrame({ ...makeMockTelemetry(scenario), connected: false });
+    };
+    socket.onclose = () => {
+      if (!disposed) setFrame((prev) => (prev.connected ? { ...prev, connected: false } : prev));
+    };
+    return () => {
+      disposed = true;
+      socket.close();
+    };
   }, [scenario]);
 
   return frame;
@@ -177,7 +377,9 @@ function Header({
           <strong>{modeLabel}</strong>
           <span className="muted"> · {robot?.statusText ?? "no robot data"}</span>
         </span>
-        <span className="hdr-mission-meta">{elapsed} elapsed</span>
+        <span className="hdr-mission-meta">
+          {elapsed} elapsed{frame.simSpeed ? ` · sim ${frame.simSpeed.toFixed(2)}×` : ""}
+        </span>
       </div>
       <div className="hdr-right">
         <div className={`hdr-pill ${pillClass}`}>
@@ -252,13 +454,15 @@ function FleetSidebar({
               <div className="fleet-row-task">{r.task}</div>
             </div>
             <div className="fleet-row-batt">
-              <div className="fleet-row-batt-num">{Math.round(r.battery * 100)}%</div>
-              <div className="fleet-row-batt-bar">
-                <div
-                  className={`fleet-row-batt-fill ${r.battery < 0.2 ? "crit" : r.battery < 0.4 ? "low" : ""}`}
-                  style={{ width: `${r.battery * 100}%` }}
-                />
-              </div>
+              <div className="fleet-row-batt-num">{r.battery < 0 ? "–" : `${Math.round(r.battery * 100)}%`}</div>
+              {r.battery >= 0 && (
+                <div className="fleet-row-batt-bar">
+                  <div
+                    className={`fleet-row-batt-fill ${r.battery < 0.2 ? "crit" : r.battery < 0.4 ? "low" : ""}`}
+                    style={{ width: `${r.battery * 100}%` }}
+                  />
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -269,11 +473,34 @@ function FleetSidebar({
 
 // ── BevMapPanel ───────────────────────────────────────────────────────────────
 
+const LEGENDS: Record<string, Array<{ label: string; background: string; border?: string }>> = {
+  cost: [
+    { label: "free", background: "rgba(60,40,100,0.5)" },
+    { label: "cost", background: "linear-gradient(90deg, #6b4fa0, #a855f7)" },
+    { label: "lethal", background: "#e4618e" },
+    { label: "unknown", background: "#0a121c", border: "1px solid #3d4d63" },
+  ],
+  mission: [
+    { label: "visited = coverage", background: "rgba(94,234,212,0.55)" },
+    { label: "seen", background: "rgba(96,165,250,0.45)" },
+    { label: "unseen", background: "rgba(42,65,90,0.8)" },
+    { label: "outside", background: "#0a121c", border: "1px solid #3d4d63" },
+  ],
+  explore: [
+    { label: "free", background: "rgba(38,92,104,0.9)" },
+    { label: "occupied", background: "#fbbf24" },
+    { label: "unknown", background: "#0a121c", border: "1px solid #3d4d63" },
+  ],
+};
+
 function BevMapPanel({
   maps,
   robots,
   connected,
   missionMode,
+  missionDetails,
+  gtRocks,
+  simTime,
   activeLayer,
   setActiveLayer,
   showTrajectory,
@@ -285,6 +512,9 @@ function BevMapPanel({
   robots: RobotState[];
   connected: boolean;
   missionMode: string;
+  missionDetails: Record<string, unknown>;
+  gtRocks?: GtRock[];
+  simTime?: number | null;
   activeLayer: string;
   setActiveLayer: (l: string) => void;
   showTrajectory: boolean;
@@ -293,23 +523,61 @@ function BevMapPanel({
   setShowPlan: (v: boolean) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState({ W: 0, H: 0 });
   const [displayOpen, setDisplayOpen] = useState(true);
-  const [showGtOverlay, setShowGtOverlay] = useState(false);
+  const [viewMode, setViewMode] = useState<"arena" | "follow">(URL_PARAMS.get("view") === "follow" ? "follow" : "arena");
+  const [zoom, setZoom] = useState(1);
+  const [showGtOverlay, setShowGtOverlay] = useState(URL_PARAMS.get("rocks") === "1");
+  const [showGtPose, setShowGtPose] = useState(URL_PARAMS.get("gt") === "1");
+  const [showCandidates, setShowCandidates] = useState(URL_PARAMS.get("candidates") !== "0");
   const [teleopClick, setTeleopClick] = useState(false);
   const [teleopStatus, setTeleopStatus] = useState("");
   const map = maps[activeLayer] ?? maps.obstacle ?? Object.values(maps)[0];
-  const now = Date.now() / 1000;
-  const teleopAvailable = connected && missionMode === "teleop_click" && Boolean(maps.obstacle);
+  const robot = robots[0];
+  const teleopAvailable = connected && missionMode === "teleop_click" && Boolean(map);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setSize({ W: entry.contentRect.width, H: entry.contentRect.height });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onWheel = (ev: WheelEvent) => {
+      ev.preventDefault();
+      setZoom((z) => Math.min(12, Math.max(0.5, z * (ev.deltaY > 0 ? 1 / 1.15 : 1.15))));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // The view: the arena (GT map extent, else the cost map) or a window following the rover.
+  let view: View | null = null;
+  const arenaMap = maps.gt ?? maps.obstacle ?? map;
+  if (arenaMap && size.W > 0 && size.H > 0) {
+    const b = mapBounds(arenaMap);
+    const follow = viewMode === "follow" && robot?.pose;
+    const span = (follow ? FOLLOW_SPAN_M : Math.max(b.x1 - b.x0, b.y1 - b.y0) * 1.04) / zoom;
+    view = {
+      cx: follow ? robot!.pose!.x : (b.x0 + b.x1) / 2,
+      cy: follow ? robot!.pose!.y : (b.y0 + b.y1) / 2,
+      scale: Math.min(size.W, size.H) / span,
+      W: size.W,
+      H: size.H,
+    };
+  }
 
   async function sendTeleopGoal(ev: React.MouseEvent<HTMLCanvasElement>) {
-    if (!teleopClick || !teleopAvailable || !maps.obstacle) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const xCanvas = ev.clientX - rect.left;
-    const yCanvas = ev.clientY - rect.top;
-    const [x, y] = canvasToWorld(maps.obstacle, xCanvas, yCanvas, rect.width, rect.height);
-    const robot = robots[0];
+    if (!teleopClick || !teleopAvailable || !view) return;
+    const rect = ev.currentTarget.getBoundingClientRect();
+    const [x, y] = canvasToWorld(view, ev.clientX - rect.left, ev.clientY - rect.top);
     const yaw = robot?.pose?.yaw ?? 0;
     setTeleopStatus(`sending ${x.toFixed(1)}, ${y.toFixed(1)}`);
     try {
@@ -329,157 +597,74 @@ function BevMapPanel({
     }
   }
 
-  // Render OccupancyGrid to canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx || !map) return;
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
+    if (!canvas || !ctx || !map || !view) return;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.floor(rect.width * dpr);
-    canvas.height = Math.floor(rect.height * dpr);
+    canvas.width = Math.floor(view.W * dpr);
+    canvas.height = Math.floor(view.H * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const W = rect.width, H = rect.height;
-    ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = "#050a12";
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, 0, view.W, view.H);
 
-    // Use the obstacle BEV map as the reference canvas coordinate frame so all
-    // layers render at the same world position and scale when toggled.
-    const refMap = maps.obstacle ?? map;
-    const refW = refMap.resolution * refMap.width;
-    const refH = refMap.resolution * refMap.height;
+    drawGrid(ctx, view, map, gridImage(map, activeLayer));
+    // Ground-truth rocks blended over the active layer, for visual alignment/recall checks.
+    if (showGtOverlay && gtRocks?.length) drawGtRocks(ctx, view, gtRocks);
+    else if (showGtOverlay && maps.gt && activeLayer !== "gt") drawGrid(ctx, view, maps.gt, gridImage(maps.gt, "gt-overlay"));
+    drawMetricGrid(ctx, view);
+    const home = missionDetails as { home_x?: number | null; home_y?: number | null; home_radius_m?: number };
+    if (showCandidates && missionMode === "explore_radius" && typeof home.home_x === "number" && typeof home.home_y === "number" && home.home_radius_m)
+      drawMissionRadius(ctx, view, home.home_x, home.home_y, home.home_radius_m);
 
-    // Draw grid cells positioned in the refMap coordinate frame
-    const cellW = (map.resolution / refW) * W;
-    const cellH = (map.resolution / refH) * H;
-    const baseX = ((map.origin.x - refMap.origin.x) / refW) * W;
-    // topRef: canvas y of world y = map.origin.y (row 0 bottom edge in world).
-    // For row r: top of cell in canvas = topRef - (r+1)*cellH  (world +y → canvas -y)
-    const topRef = H - ((map.origin.y - refMap.origin.y) / refH) * H;
-    for (let row = 0; row < map.height; row++) {
-      const cy = topRef - (row + 1) * cellH;
-      for (let col = 0; col < map.width; col++) {
-        const v = map.data[row * map.width + col] ?? -1;
-        ctx.fillStyle = colorForCell(v, activeLayer);
-        ctx.fillRect(baseX + col * cellW, cy, Math.ceil(cellW), Math.ceil(cellH));
-      }
-    }
+    robots.forEach((r) => {
+      if (showGtPose && r.gtTrajectory) drawPolyline(ctx, view!, r.gtTrajectory, "rgba(251,191,36,0.55)", 1.5, [1, 3]);
+      if (showTrajectory) drawPolyline(ctx, view!, r.trajectory, "rgba(94,234,212,0.55)", 2, [2, 4]);
+      if (showPlan) drawPolyline(ctx, view!, r.plan, "rgba(232,121,249,0.9)", 2.5, [8, 7]);
+      if (showCandidates && r.candidates) drawCandidates(ctx, view!, r.candidates);
 
-    // Ground-truth overlay: GT rocks blended semi-transparent over the active
-    // layer (same refMap positioning math), for visual alignment/recall checks.
-    if (showGtOverlay && maps.gt && activeLayer !== "gt") {
-      const gt = maps.gt;
-      const gCellW = (gt.resolution / refW) * W;
-      const gCellH = (gt.resolution / refH) * H;
-      const gBaseX = ((gt.origin.x - refMap.origin.x) / refW) * W;
-      const gTopRef = H - ((gt.origin.y - refMap.origin.y) / refH) * H;
-      ctx.fillStyle = "rgba(244,114,182,0.45)";
-      for (let row = 0; row < gt.height; row++) {
-        const cy = gTopRef - (row + 1) * gCellH;
-        for (let col = 0; col < gt.width; col++) {
-          const v = gt.data[row * gt.width + col] ?? -1;
-          if (v >= 50) ctx.fillRect(gBaseX + col * gCellW, cy, Math.ceil(gCellW), Math.ceil(gCellH));
-        }
-      }
-    }
-
-    // Subtle grid lines
-    ctx.strokeStyle = "rgba(94,234,212,0.07)";
-    ctx.lineWidth = 0.5;
-    for (let i = 0; i <= 8; i++) {
-      const x = (W * i) / 8, y = (H * i) / 8;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-    }
-
-    robots.forEach((robot) => {
-      if (showTrajectory && robot.trajectory.length > 1) {
-        ctx.strokeStyle = "rgba(94,234,212,0.50)";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([2, 4]);
-        ctx.beginPath();
-        robot.trajectory.forEach((p, i) => {
-          const [x, y] = worldToCanvas(refMap, p.x, p.y, W, H);
-          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-
-      if (showPlan && robot.plan.length > 1) {
-        ctx.strokeStyle = "rgba(232,121,249,0.9)";
-        ctx.lineWidth = 2.5;
-        ctx.setLineDash([8, 7]);
-        ctx.beginPath();
-        robot.plan.forEach((p, i) => {
-          const [x, y] = worldToCanvas(refMap, p.x, p.y, W, H);
-          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-
-      if (robot.goal) {
-        const [gx, gy] = worldToCanvas(refMap, robot.goal.x, robot.goal.y, W, H);
+      if (r.goal) {
+        const [gx, gy] = worldToCanvas(view!, r.goal.x, r.goal.y);
         ctx.strokeStyle = "#e879f9";
         ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(gx, gy, 18, 0, Math.PI * 2); ctx.stroke();
-        ctx.beginPath(); ctx.arc(gx, gy, 6,  0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(gx, gy, 14, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(gx, gy, 5, 0, Math.PI * 2); ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(gx - 26, gy); ctx.lineTo(gx - 10, gy);
-        ctx.moveTo(gx + 10, gy); ctx.lineTo(gx + 26, gy);
-        ctx.moveTo(gx, gy - 26); ctx.lineTo(gx, gy - 10);
-        ctx.moveTo(gx, gy + 10); ctx.lineTo(gx, gy + 26);
+        ctx.moveTo(gx - 20, gy); ctx.lineTo(gx - 8, gy);
+        ctx.moveTo(gx + 8, gy); ctx.lineTo(gx + 20, gy);
+        ctx.moveTo(gx, gy - 20); ctx.lineTo(gx, gy - 8);
+        ctx.moveTo(gx, gy + 8); ctx.lineTo(gx, gy + 20);
         ctx.stroke();
         ctx.fillStyle = "#e879f9";
-        ctx.beginPath(); ctx.arc(gx, gy, 2, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = "#e879f9";
         ctx.font = "10px 'JetBrains Mono', monospace";
-        ctx.fillText("GOAL", gx + 22, gy - 14);
+        ctx.fillText("GOAL", gx + 18, gy - 12);
         ctx.fillStyle = "rgba(192,132,252,0.8)";
-        ctx.fillText(`${robot.goal.x.toFixed(1)}, ${robot.goal.y.toFixed(1)}`, gx + 22, gy - 2);
+        ctx.fillText(`${r.goal.x.toFixed(1)}, ${r.goal.y.toFixed(1)}`, gx + 18, gy);
       }
 
-      if (robot.pose) {
-        const [rx, ry] = worldToCanvas(refMap, robot.pose.x, robot.pose.y, W, H);
-        ctx.save();
-        ctx.translate(rx, ry);
-        // Canvas y points down, and the rover wedge is drawn along +x.
-        ctx.rotate(-(robot.pose.yaw - refMap.origin.yaw));
-        // Body circle
-        ctx.fillStyle = "rgba(5,10,18,0.75)";
-        ctx.strokeStyle = "#5eead4";
-        ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-        // Forward indicator: filled wedge pointing right (= robot +x after rotation)
-        ctx.fillStyle = "#5eead4";
-        ctx.strokeStyle = "#050a12";
-        ctx.lineWidth = 1.0;
-        ctx.beginPath();
-        ctx.moveTo(16, 0);          // nose
-        ctx.lineTo(6, -6);          // top-rear
-        ctx.lineTo(9, 0);           // rear-center notch
-        ctx.lineTo(6, 6);           // bottom-rear
-        ctx.closePath(); ctx.fill(); ctx.stroke();
-        ctx.restore();
+      const fp = r.footprint ?? { halfLength: 0.495, halfWidth: 0.335 };
+      if (showGtPose && r.gtPose) drawRover(ctx, view!, r.gtPose, fp, true);
+      if (r.pose) {
+        drawRover(ctx, view!, r.pose, fp, false);
+        const [rx, ry] = worldToCanvas(view!, r.pose.x, r.pose.y);
         ctx.fillStyle = "rgba(94,234,212,0.9)";
         ctx.font = "10px 'JetBrains Mono', monospace";
-        ctx.fillText(robot.name, rx + 22, ry + 4);
+        ctx.fillText(r.name, rx + Math.max(14, fp.halfLength * view!.scale + 6), ry + 4);
       }
     });
-  }, [activeLayer, map, maps, robots, showPlan, showTrajectory, showGtOverlay]);
+  }, [activeLayer, map, maps, robots, gtRocks, missionDetails, missionMode, showPlan, showTrajectory, showGtOverlay, showGtPose, showCandidates, view?.cx, view?.cy, view?.scale, view?.W, view?.H]);
 
+  // Map stamps are ROS (sim) time when the backend reports a sim clock, wall time in mock mode.
+  const age = map?.stamp ? (simTime ?? Date.now() / 1000) - map.stamp : undefined;
   const mapMeta = map
-    ? `${map.width} × ${map.height} · ${map.resolution.toFixed(2)} m/cell · age ${ageLabel(map.stamp, now)}`
+    ? `${map.width} × ${map.height} · ${map.resolution.toFixed(2)} m/cell · age ${age === undefined ? "–" : age < 1 ? `${Math.round(Math.max(0, age) * 1000)} ms` : `${age.toFixed(1)} s`}`
     : "no map data";
-
-  const scaleMeters = map ? (map.resolution * map.width * 0.1).toFixed(0) + " m" : "–";
+  const scaleMeters = view ? niceScaleMeters(view.scale) : 0;
+  const legend = LEGENDS[activeLayer === "explore" || activeLayer === "mission" ? activeLayer : "cost"];
 
   return (
     <div className="panel panel-costmap">
-      <div className="costmap">
+      <div className="costmap" ref={wrapRef}>
         {map ? (
           <canvas
             ref={canvasRef}
@@ -490,13 +675,11 @@ function BevMapPanel({
           <div className="costmap-empty">waiting for map</div>
         )}
 
-        {/* Label */}
         <div className="costmap-label">
-          <div className="costmap-label-title">{LAYER_LABELS[activeLayer] ?? activeLayer} cost</div>
+          <div className="costmap-label-title">{LAYER_TITLES[activeLayer] ?? activeLayer}</div>
           <div className="costmap-label-meta">{mapMeta}</div>
         </div>
 
-        {/* Display controls */}
         <div className={`costmap-display${displayOpen ? "" : " is-collapsed"}`}>
           <button className="costmap-display-hdr" onClick={() => setDisplayOpen((v) => !v)}>
             <span className="costmap-display-title">Display</span>
@@ -505,22 +688,39 @@ function BevMapPanel({
           {displayOpen && (
             <div className="costmap-display-body">
               <div className="costmap-display-tabs">
-                {Object.keys({ obstacle: 1, water: 1, mission: 1, gt: 1 })
-                  .filter((k) => maps[k] || k === activeLayer)
-                  .map((key) => (
-                    <div
-                      key={key}
-                      className={`costmap-display-tab${key === activeLayer ? " is-active" : ""}`}
-                      onClick={() => setActiveLayer(key)}
-                    >
-                      {LAYER_LABELS[key] ?? key}
-                    </div>
-                  ))}
+                {LAYER_ORDER.filter((k) => maps[k] || k === activeLayer).map((key) => (
+                  <div
+                    key={key}
+                    className={`costmap-display-tab${key === activeLayer ? " is-active" : ""}`}
+                    onClick={() => setActiveLayer(key)}
+                  >
+                    {LAYER_LABELS[key] ?? key}
+                  </div>
+                ))}
+              </div>
+              <div className="costmap-display-tabs costmap-view-tabs">
+                {(["arena", "follow"] as const).map((mode) => (
+                  <div
+                    key={mode}
+                    className={`costmap-display-tab${mode === viewMode ? " is-active" : ""}`}
+                    onClick={() => { setViewMode(mode); setZoom(1); }}
+                  >
+                    {mode === "arena" ? "Arena" : "Follow"}
+                  </div>
+                ))}
               </div>
               <div className="costmap-display-checks">
                 <label className="costmap-display-check">
                   <input type="checkbox" checked={showGtOverlay} onChange={(e) => setShowGtOverlay(e.target.checked)} />
-                  GT overlay
+                  GT rocks
+                </label>
+                <label className="costmap-display-check">
+                  <input type="checkbox" checked={showGtPose} onChange={(e) => setShowGtPose(e.target.checked)} />
+                  GT pose + trail
+                </label>
+                <label className="costmap-display-check">
+                  <input type="checkbox" checked={showCandidates} onChange={(e) => setShowCandidates(e.target.checked)} />
+                  Goal candidates
                 </label>
                 <label className="costmap-display-check">
                   <input type="checkbox" checked={showTrajectory} onChange={(e) => setShowTrajectory(e.target.checked)} />
@@ -550,20 +750,13 @@ function BevMapPanel({
           )}
         </div>
 
-        {/* Legend */}
         <div className="costmap-legend">
-          <div className="costmap-legend-item">
-            <span className="costmap-legend-swatch" style={{ background: "linear-gradient(90deg, #3c2864, #6b4fa0)" }} />
-            low
-          </div>
-          <div className="costmap-legend-item">
-            <span className="costmap-legend-swatch" style={{ background: "linear-gradient(90deg, #6b4fa0, #a855f7)" }} />
-            medium
-          </div>
-          <div className="costmap-legend-item">
-            <span className="costmap-legend-swatch" style={{ background: "linear-gradient(90deg, #a855f7, #e879f9)" }} />
-            high
-          </div>
+          {legend.map((item) => (
+            <div className="costmap-legend-item" key={item.label}>
+              <span className="costmap-legend-swatch" style={{ background: item.background, border: item.border }} />
+              {item.label}
+            </div>
+          ))}
           <div className="costmap-legend-item">
             <span className="costmap-legend-swatch" style={{ background: "#e879f9", height: 2, marginTop: 3 }} />
             plan
@@ -572,14 +765,33 @@ function BevMapPanel({
             <span className="costmap-legend-swatch" style={{ background: "#5eead4", height: 2, marginTop: 3 }} />
             trail
           </div>
+          {showGtPose && (
+            <div className="costmap-legend-item">
+              <span className="costmap-legend-swatch" style={{ background: "#fbbf24", height: 2, marginTop: 3 }} />
+              GT
+            </div>
+          )}
+          {showGtOverlay && (
+            <div className="costmap-legend-item">
+              <span className="costmap-legend-swatch" style={{ background: "rgba(244,114,182,0.5)", border: "1px solid #f472b6", borderRadius: "50%" }} />
+              GT rock
+            </div>
+          )}
+          {showCandidates && (robot?.candidates?.length ?? 0) > 0 && (
+            <div className="costmap-legend-item">
+              <span className="costmap-legend-swatch" style={{ background: "#93c5fd", width: 6, height: 6, borderRadius: "50%", marginTop: 2 }} />
+              next goals
+            </div>
+          )}
         </div>
 
-        {/* Scale */}
-        <div className="costmap-scale">
-          0
-          <span className="costmap-scale-bar" />
-          {scaleMeters}
-        </div>
+        {view && (
+          <div className="costmap-scale">
+            0
+            <span className="costmap-scale-bar" style={{ width: scaleMeters * view.scale }} />
+            {scaleMeters} m
+          </div>
+        )}
       </div>
     </div>
   );
@@ -770,6 +982,69 @@ function CameraPanel({
   );
 }
 
+// ── Stack status panels (v2: supervisor + terrain publisher) ─────────────────
+
+function StatusKv({ label, value, unit, cls }: { label: string; value: React.ReactNode; unit?: string; cls?: string }) {
+  return (
+    <div className="robot-kv">
+      <div className="robot-kv-lbl">{label}</div>
+      <div className={`robot-kv-val${cls ? " " + cls : ""}`}>
+        {value}
+        {unit && <span className="unit">{unit}</span>}
+      </div>
+    </div>
+  );
+}
+
+function LocalizationPanel({ frame }: { frame: TelemetryFrame }) {
+  const loc = frame.localization;
+  const now = Date.now() / 1000;
+  const cls = !loc ? "warn" : loc.motionPermitted ? "ok" : loc.state === "faulted" ? "err" : "warn";
+  return (
+    <div className="panel panel-status">
+      <div className="panel-body robot-panel">
+        <div className="robot-name-row">
+          <div className="robot-name">Localization</div>
+          <div className={`robot-status-badge ${cls}`}>{loc ? loc.state.toUpperCase() : "N/A"}</div>
+        </div>
+        <div className="robot-task">{loc ? loc.reason : "no supervisor status (legacy stack or not started)"}</div>
+        <div className="robot-kv-grid">
+          <StatusKv label="Motion" value={loc ? (loc.motionPermitted ? "permitted" : "held") : "–"} cls={loc && !loc.motionPermitted ? "warn" : undefined} />
+          <StatusKv label="GLIM epoch" value={loc ? loc.epoch : "–"} />
+          <StatusKv label="Status age" value={ageLabel(loc?.stamp, now)} />
+          <StatusKv label="Sim speed" value={frame.simSpeed ? frame.simSpeed.toFixed(2) : "–"} unit={frame.simSpeed ? "×" : undefined} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TerrainPanel({ frame }: { frame: TelemetryFrame }) {
+  const t = frame.terrain;
+  const now = Date.now() / 1000;
+  const cls = !t ? "warn" : t.valid ? "ok" : "err";
+  const lag = t?.evidenceLagSec;
+  return (
+    <div className="panel panel-status">
+      <div className="panel-body robot-panel">
+        <div className="robot-name-row">
+          <div className="robot-name">Terrain map</div>
+          <div className={`robot-status-badge ${cls}`}>{!t ? "N/A" : t.valid ? "VALID" : "INVALID"}</div>
+        </div>
+        <div className="robot-task">
+          {!t ? "no v2 terrain status" : t.failure ? t.failure : `epoch ${t.epoch ?? "–"} · ${t.projected} windows · status ${ageLabel(t.stamp, now)}`}
+        </div>
+        <div className="robot-kv-grid">
+          <StatusKv label="Chunks in" value={t ? t.received : "–"} />
+          <StatusKv label="Skipped / late" value={t ? `${t.skippedSequences} / ${t.lateChunks}` : "–"} cls={t && t.skippedSequences + t.lateChunks > 0 ? "warn" : undefined} />
+          <StatusKv label="Evidence lag" value={lag != null ? lag.toFixed(2) : "–"} unit={lag != null ? "s" : undefined} cls={lag != null && lag > 0.5 ? "warn" : undefined} />
+          <StatusKv label="Peak RSS" value={t?.peakRssMib != null ? Math.round(t.peakRssMib) : "–"} unit={t?.peakRssMib != null ? "MiB" : undefined} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── RobotStatusPanel ─────────────────────────────────────────────────────────
 
 function RobotStatusPanel({ robot, frame }: { robot: RobotState | undefined; frame: TelemetryFrame }) {
@@ -796,6 +1071,7 @@ function RobotStatusPanel({ robot, frame }: { robot: RobotState | undefined; fra
   const slamFresh = topics["slam/pose_corrected"]?.stamp;
   const lidarFresh = topics["lidar_0/pointcloud/filtered"]?.stamp;
   const topicCount = Object.keys(topics).length;
+  const slamError = robot.pose && robot.gtPose ? Math.hypot(robot.pose.x - robot.gtPose.x, robot.pose.y - robot.gtPose.y) : null;
 
   return (
     <div className="panel panel-robot">
@@ -829,8 +1105,11 @@ function RobotStatusPanel({ robot, frame }: { robot: RobotState | undefined; fra
             <div className="robot-kv-val">{speed}<span className="unit">m/s</span></div>
           </div>
           <div className="robot-kv">
-            <div className="robot-kv-lbl">Topics up</div>
-            <div className="robot-kv-val">{topicCount}</div>
+            <div className="robot-kv-lbl">{slamError !== null ? "SLAM err (GT)" : "Topics up"}</div>
+            <div className="robot-kv-val">
+              {slamError !== null ? slamError.toFixed(2) : topicCount}
+              {slamError !== null && <span className="unit">m</span>}
+            </div>
           </div>
           <div className="robot-kv">
             <div className="robot-kv-lbl">SLAM age</div>
@@ -961,24 +1240,21 @@ function SparkRow({
 
 // ── TopicFreqsPanel ──────────────────────────────────────────────────────────
 
-const TOPIC_FREQ_KEYS = [
-  { key: "PointCloud Hz", unit: "Hz" },
-  { key: "IMU Hz",        unit: "Hz" },
-  { key: "SLAM pose Hz",  unit: "Hz" },
-  { key: "Voxel map Hz",  unit: "Hz" },
-  { key: "BEV map Hz",    unit: "Hz" },
-  { key: "Camera Hz",     unit: "Hz" },
-];
+const LEGACY_RATE_SERIES = ["LiDAR Hz", "IMU Hz", "SLAM pose Hz", "Voxel map Hz", "BEV map Hz", "Camera Hz"];
 
-function TopicFreqsPanel({ series }: { series: Record<string, number[]> }) {
+function TopicFreqsPanel({ series, rateSeries }: { series: Record<string, number[]>; rateSeries?: string[] }) {
+  const keys = [...(rateSeries ?? LEGACY_RATE_SERIES), "Sim speed"].map((key) => ({
+    key,
+    unit: key === "Sim speed" ? "×" : "Hz",
+  }));
   return (
     <div className="panel panel-freqs">
       <div className="panel-hdr">
         <div className="panel-hdr-title accent">Topic Frequencies</div>
-        <div className="panel-hdr-meta">30 s window</div>
+        <div className="panel-hdr-meta">per sim second · last 3 min</div>
       </div>
       <div className="sparks-grid">
-        {TOPIC_FREQ_KEYS.map(({ key, unit }) => {
+        {keys.map(({ key, unit }) => {
           const data = series[key] ?? [];
           const last = data[data.length - 1];
           return <SparkRow key={key} label={key} value={last} unit={unit} data={data} />;
@@ -1002,7 +1278,7 @@ function AlgoPerfPanel({ series }: { series: Record<string, number[]> }) {
     <div className="panel panel-perf">
       <div className="panel-hdr">
         <div className="panel-hdr-title accent">Algorithm Performance</div>
-        <div className="panel-hdr-meta">30 s window</div>
+        <div className="panel-hdr-meta">recent samples</div>
       </div>
       <div className="sparks-grid">
         {ALGO_PERF_KEYS.map(({ key, unit, fmt }) => {
@@ -1047,7 +1323,7 @@ function StatusFooter({
       </div>
       <div className="status-item">
         <span className="status-lbl">DDS</span>
-        <span className="status-val ok">domain 177 · cyclone</span>
+        <span className="status-val ok">{frame.dds ? `domain ${frame.dds.domain} · ${frame.dds.rmw}` : "–"}</span>
       </div>
       <div className="status-item">
         <span className="status-lbl">TF</span>
@@ -1111,8 +1387,8 @@ function EventsPanel({ events, onClose }: { events: TelemetryFrame["events"]; on
 function App() {
   const [scenario, setScenario] = useState<MockScenario>("nominal");
   const frame = useTelemetry(scenario);
-  const [activeLayer, setActiveLayer] = useState("obstacle");
-  const [showTrajectory, setShowTrajectory] = useState(false);
+  const [activeLayer, setActiveLayer] = useState(URL_PARAMS.get("layer") ?? "obstacle");
+  const [showTrajectory, setShowTrajectory] = useState(true);
   const [showPlan, setShowPlan] = useState(true);
   const [showEvents, setShowEvents] = useState(false);
   const [selectedRobotId, setSelectedRobotId] = useState("astrobot_0");
@@ -1126,7 +1402,7 @@ function App() {
         name: robot.name,
         status: severityToStatus(robot.severity),
         task: robot.statusText,
-        battery: 0.74, // not yet in backend schema; placeholder
+        battery: frame.connected ? -1 : 0.74, // not in the backend schema: hidden when live
       }
     : undefined;
   const fleetEntries: FleetEntry[] = liveEntry
@@ -1180,6 +1456,9 @@ function App() {
             robots={frame.robots}
             connected={frame.connected}
             missionMode={frame.mission.mode}
+            missionDetails={frame.mission.details}
+            gtRocks={frame.gtRocks}
+            simTime={frame.simTime}
             activeLayer={activeLayer}
             setActiveLayer={setActiveLayer}
             showTrajectory={showTrajectory}
@@ -1189,8 +1468,24 @@ function App() {
           />
           <div className="right-col">
             <div className="cam-row">
-              <CameraPanel index={0} cameraTopics={frame.cameraTopics} topics={frame.topics} connected={frame.connected} now={frame.stamp} />
-              <CameraPanel index={1} cameraTopics={frame.cameraTopics} topics={frame.topics} connected={frame.connected} now={frame.stamp} />
+              {/* Live runs without a camera (v2 sim nav stream) show the stack status instead; with
+                  one (v2_demo.sh --camera) the camera sits beside the localization supervisor. */}
+              {frame.connected && frame.cameraTopics.length === 0 ? (
+                <>
+                  <LocalizationPanel frame={frame} />
+                  <TerrainPanel frame={frame} />
+                </>
+              ) : frame.connected && frame.localization ? (
+                <>
+                  <CameraPanel index={0} cameraTopics={frame.cameraTopics} topics={frame.topics} connected={frame.connected} now={frame.stamp} />
+                  <LocalizationPanel frame={frame} />
+                </>
+              ) : (
+                <>
+                  <CameraPanel index={0} cameraTopics={frame.cameraTopics} topics={frame.topics} connected={frame.connected} now={frame.stamp} />
+                  <CameraPanel index={1} cameraTopics={frame.cameraTopics} topics={frame.topics} connected={frame.connected} now={frame.stamp} />
+                </>
+              )}
             </div>
             <div className="info-row">
               <RobotStatusPanel robot={robot} frame={frame} />
@@ -1201,7 +1496,7 @@ function App() {
         </div>
 
         {/* Sparklines */}
-        <TopicFreqsPanel series={frame.series} />
+        <TopicFreqsPanel series={frame.series} rateSeries={frame.rateSeries} />
 
         {/* Events popover */}
         {showEvents && <EventsPanel events={frame.events} onClose={() => setShowEvents(false)} />}

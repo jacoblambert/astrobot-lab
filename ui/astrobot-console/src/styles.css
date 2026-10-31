@@ -238,6 +238,7 @@ button {
   gap: 10px; flex-shrink: 0;
 }
 .panel-perf { flex: 1; min-height: 0; }
+.costmap-view-tabs { grid-template-columns: repeat(2, 1fr); }
 
 /* ============================================================ */
 /* Panel base                                                    */
