@@ -1,0 +1,13 @@
+# Simulation-only nodes (ground-truth driven). Not part of a hardware deployment.
+/**/synthetic_rtk:
+  ros__parameters:
+    gt_topic: /gt/base_link_pose
+    output_topic: /rtk/pose
+    world_frame: map
+    # map = world - home: the sim's spawn (20, 18) sits at map (40, 38) with home (-20, -20).
+    home_xy: [-20.0, -20.0]
+    # Antenna at the IMU (base_from_imu translation in config/robot.yaml).
+    antenna_offset_xyz: [0.26399862939321395, 0.017279625659938347, 0.2624700776230195]
+    sigma0: 0.02
+    sigma_per_m: 0.001
+    latency_s: 0.0

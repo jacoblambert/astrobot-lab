@@ -1,0 +1,13 @@
+command_mux:
+  ros__parameters:
+    use_sim_time: true
+    default_mode: auto
+    publish_rate_hz: 20.0
+    nav_timeout_sec: 0.5
+    teleop_timeout_sec: 0.5
+    max_linear_x: 0.30
+    max_angular_z: 1.50
+    linear_scale: 1.0
+    angular_scale: 1.0
+    # Acceleration shaping is nav2_velocity_smoother's (upstream of the mux): the mux only
+    # arbitrates, scales, clamps and gates (watchdog, e-stop, localization permission).

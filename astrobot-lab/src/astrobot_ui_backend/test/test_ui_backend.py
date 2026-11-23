@@ -1,3 +1,17 @@
+# Copyright 2026 Jacob Lambert
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Console backend contracts that need no running graph (grid conversion, GT overlay frame)."""
 import json
 import math
@@ -10,7 +24,7 @@ pytest.importorskip("rclpy")
 from nav_msgs.msg import OccupancyGrid  # noqa: E402
 
 from astrobot_ui_backend.ui_backend import (  # noqa: E402
-    STACKS, TRAIL_SPACING_M, UiBridgeNode, load_gt_rocks, occupancy_grid_to_dict, trail_append, windowed_rate)
+    TRAIL_SPACING_M, UiBridgeNode, load_gt_rocks, occupancy_grid_to_dict, trail_append, windowed_rate)
 
 
 def grid(width, height, data, frame="map", yaw=0.0):
@@ -38,7 +52,7 @@ def test_downsampling_keeps_a_lone_occupied_cell_off_the_stride_lattice():
     assert partial["data"] == [0]
 
 
-def test_full_v2_mosaic_is_not_decimated():
+def test_full_mosaic_is_not_decimated():
     out = occupancy_grid_to_dict(grid(600, 600, [0] * 360_000))
     assert (out["width"], out["downsample"]) == (600, 1)
 
@@ -82,8 +96,8 @@ def test_gt_rocks_come_from_the_scene_inventory_in_the_map_frame(tmp_path):
         load_gt_rocks(str(scene), (20.0, 20.0, 0.1))
 
 
-def test_v2_gt_overlay_uses_the_rtk_home_frame():
-    node = SimpleNamespace(_gt_to_map_transform=tuple(STACKS["v2"]["gt_to_map"]))
+def test_gt_overlay_uses_the_rtk_home_frame():
+    node = SimpleNamespace(_gt_to_map_transform=(20.0, 20.0, 0.0))  # home_xy (-20, -20)
     pose = UiBridgeNode._gt_in_map(node, {"x": 20.0, "y": 18.0, "yaw": 0.5, "stamp": 3.0})
     assert pose == {"x": 40.0, "y": 38.0, "yaw": 0.5, "stamp": 3.0}
-    assert UiBridgeNode._gt_in_map(SimpleNamespace(_gt_to_map_transform=None), pose) is None
+    assert UiBridgeNode._gt_in_map(node, None) is None

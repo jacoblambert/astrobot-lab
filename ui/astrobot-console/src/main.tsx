@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Footprint, GridMap, GtRock, Pose2D, RobotState, Severity, TelemetryFrame } from "./types";
-import { makeMockTelemetry, MOCK_FLEET_EXTRA, type FleetEntry, type MockScenario } from "./mockTelemetry";
 import "./styles.css";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -26,20 +25,29 @@ const LAYER_TITLES: Record<string, string> = {
   gt: "GT obstacles",
 };
 
-const DUMMY_CAM_TOPICS = [
-  "camera_0/image_raw",
-  "camera_0/image_rect",
-  "camera_0/depth_preview",
-  "/gt/debug/chase_camera",
-];
-
-const SCENARIO_LABELS: Record<MockScenario, string> = {
-  nominal: "Nominal",
-  replanning: "Replanning",
-  slam_warning: "SLAM warn",
-  critical: "Critical",
-  success: "Sample return",
+/** Shown until the backend's first frame arrives, and kept (marked offline) after it drops. */
+const OFFLINE_FRAME: TelemetryFrame = {
+  schemaVersion: "astrobot.console.v1",
+  stamp: 0,
+  connected: false,
+  robots: [],
+  mission: {
+    mode: "no backend", state: "offline", elapsedSec: 0, coverageFraction: 0, bestSample: 0,
+    goals: 0, successes: 0, failures: 0, returningHome: false, details: {},
+  },
+  maps: {},
+  cameraTopics: [],
+  series: {},
+  topics: {},
+  events: [],
 };
+
+interface FleetEntry {
+  id: string;
+  name: string;
+  status: "ok" | "warn" | "err" | "off";
+  task: string;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -81,7 +89,7 @@ function formatNow(d: Date) {
 
 // ── Map view ─────────────────────────────────────────────────────────────────
 
-/** Initial display from the URL, for bookmarkable demo views: ?layer=explore&view=follow&rocks=1&gt=1 */
+/** Initial display from the URL, for bookmarkable views: ?layer=explore&view=follow&rocks=1&gt=1 */
 const URL_PARAMS = new URLSearchParams(window.location.search);
 
 /** A square world window on the canvas: centre (cx, cy) in map metres, `scale` px per metre. */
@@ -299,34 +307,37 @@ function niceScaleMeters(scale: number): number {
 
 // ── useTelemetry ─────────────────────────────────────────────────────────────
 
-function useTelemetry(scenario: MockScenario): TelemetryFrame {
-  const [frame, setFrame] = useState<TelemetryFrame>(() => makeMockTelemetry(scenario));
-
-  useEffect(() => {
-    setFrame((prev) => (prev.connected ? prev : makeMockTelemetry(scenario)));
-  }, [scenario]);
+/** Live frames from the backend WebSocket; reconnects every 2 s while the backend is down. */
+function useTelemetry(): TelemetryFrame {
+  const [frame, setFrame] = useState<TelemetryFrame>(OFFLINE_FRAME);
 
   useEffect(() => {
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${proto}://${window.location.host}/ws/telemetry`);
-    // A socket this effect closed itself (re-render, StrictMode) must not flip the view to mock.
+    // A socket this effect closed itself (re-render, StrictMode) must not mark the view offline.
     let disposed = false;
-    socket.onmessage = (ev) => {
-      if (disposed) return;
-      const parsed = JSON.parse(ev.data) as TelemetryFrame;
-      setFrame((prev) => ({ ...parsed, maps: { ...(prev.connected ? prev.maps : {}), ...parsed.maps } }));
+    let socket: WebSocket | null = null;
+    let retry: number | undefined;
+    const connect = () => {
+      socket = new WebSocket(`${proto}://${window.location.host}/ws/telemetry`);
+      socket.onmessage = (ev) => {
+        if (disposed) return;
+        const parsed = JSON.parse(ev.data) as TelemetryFrame;
+        // Maps arrive only when they change: keep the layers already received on this connection.
+        setFrame((prev) => ({ ...parsed, maps: { ...(prev.connected ? prev.maps : {}), ...parsed.maps } }));
+      };
+      socket.onclose = () => {
+        if (disposed) return;
+        setFrame((prev) => (prev.connected ? { ...prev, connected: false } : prev));
+        retry = window.setTimeout(connect, 2000);
+      };
     };
-    socket.onerror = () => {
-      if (!disposed) setFrame({ ...makeMockTelemetry(scenario), connected: false });
-    };
-    socket.onclose = () => {
-      if (!disposed) setFrame((prev) => (prev.connected ? { ...prev, connected: false } : prev));
-    };
+    connect();
     return () => {
       disposed = true;
-      socket.close();
+      window.clearTimeout(retry);
+      socket?.close();
     };
-  }, [scenario]);
+  }, []);
 
   return frame;
 }
@@ -337,14 +348,10 @@ function Header({
   frame,
   fleetTotal,
   fleetOnline,
-  scenario,
-  setScenario,
 }: {
   frame: TelemetryFrame;
   fleetTotal: number;
   fleetOnline: number;
-  scenario: MockScenario;
-  setScenario: (s: MockScenario) => void;
 }) {
   const [now, setNow] = useState(() => formatNow(new Date()));
   useEffect(() => {
@@ -390,20 +397,7 @@ function Header({
           <div className="hdr-clock-time">{now.timeStr}</div>
           <div className="hdr-clock-date">{now.dateStr}</div>
         </div>
-        {!frame.connected && (
-          <>
-            <div className="hdr-badge-mock">MOCK</div>
-            <select
-              className="hdr-scenario"
-              value={scenario}
-              onChange={(e) => setScenario(e.target.value as MockScenario)}
-            >
-              {Object.entries(SCENARIO_LABELS).map(([val, label]) => (
-                <option key={val} value={val}>{label}</option>
-              ))}
-            </select>
-          </>
-        )}
+        {!frame.connected && <div className="hdr-badge-offline">OFFLINE</div>}
       </div>
     </div>
   );
@@ -440,7 +434,7 @@ function FleetSidebar({
           </div>
         ))}
       </div>
-      <div className="fleet-collbl"><span>Unit · task</span><span>Power</span></div>
+      <div className="fleet-collbl"><span>Unit · task</span></div>
       <div className="fleet-list">
         {entries.map((r) => (
           <div
@@ -452,17 +446,6 @@ function FleetSidebar({
             <div className="fleet-row-body">
               <div className="fleet-row-name">{r.name}</div>
               <div className="fleet-row-task">{r.task}</div>
-            </div>
-            <div className="fleet-row-batt">
-              <div className="fleet-row-batt-num">{r.battery < 0 ? "–" : `${Math.round(r.battery * 100)}%`}</div>
-              {r.battery >= 0 && (
-                <div className="fleet-row-batt-bar">
-                  <div
-                    className={`fleet-row-batt-fill ${r.battery < 0.2 ? "crit" : r.battery < 0.4 ? "low" : ""}`}
-                    style={{ width: `${r.battery * 100}%` }}
-                  />
-                </div>
-              )}
             </div>
           </div>
         ))}
@@ -654,7 +637,7 @@ function BevMapPanel({
     });
   }, [activeLayer, map, maps, robots, gtRocks, missionDetails, missionMode, showPlan, showTrajectory, showGtOverlay, showGtPose, showCandidates, view?.cx, view?.cy, view?.scale, view?.W, view?.H]);
 
-  // Map stamps are ROS (sim) time when the backend reports a sim clock, wall time in mock mode.
+  // Map stamps are ROS (sim) time when the backend reports a sim clock, else wall time.
   const age = map?.stamp ? (simTime ?? Date.now() / 1000) - map.stamp : undefined;
   const mapMeta = map
     ? `${map.width} × ${map.height} · ${map.resolution.toFixed(2)} m/cell · age ${age === undefined ? "–" : age < 1 ? `${Math.round(Math.max(0, age) * 1000)} ms` : `${age.toFixed(1)} s`}`
@@ -799,65 +782,6 @@ function BevMapPanel({
 
 // ── CameraPanel ───────────────────────────────────────────────────────────────
 
-function MockCamFeed({ scene }: { scene: 0 | 1 }) {
-  return (
-    <svg className="cam-mock-svg" viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice">
-      <defs>
-        <linearGradient id={`sky${scene}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stopColor="#0a1828" />
-          <stop offset="55%"  stopColor="#162a3f" />
-          <stop offset="100%" stopColor="#0a1828" />
-        </linearGradient>
-        <linearGradient id={`floor${scene}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stopColor="#1a2c3e" />
-          <stop offset="100%" stopColor="#06101a" />
-        </linearGradient>
-      </defs>
-      <rect x="0" y="0" width="320" height="180" fill={`url(#sky${scene})`} />
-      <line x1="0" y1="108" x2="320" y2="108" stroke="#5eead4" strokeWidth="0.3" opacity="0.3" />
-      <rect x="0" y="108" width="320" height="72" fill={`url(#floor${scene})`} />
-      {scene === 0 ? (
-        <>
-          <polygon points="0,108 60,88 140,100 220,82 320,92 320,108" fill="#0b2030" />
-          <rect x="44" y="118" width="30" height="22" rx="2" fill="#1f4a6e" stroke="#5eead4" strokeWidth="0.5" />
-          <rect x="205" y="114" width="40" height="28" rx="2" fill="#2a5a86" stroke="#5eead4" strokeWidth="0.5" />
-          <g>
-            <rect x="118" y="96" width="64" height="40" fill="none" stroke="#5eead4" strokeWidth="0.9" strokeDasharray="3 2" />
-            <text x="120" y="94" fontFamily="monospace" fontSize="5.5" fill="#5eead4">rock · 0.91</text>
-          </g>
-          <g stroke="#5eead4" strokeWidth="0.25" opacity="0.15">
-            <line x1="160" y1="108" x2="40"  y2="180" />
-            <line x1="160" y1="108" x2="110" y2="180" />
-            <line x1="160" y1="108" x2="160" y2="180" />
-            <line x1="160" y1="108" x2="210" y2="180" />
-            <line x1="160" y1="108" x2="280" y2="180" />
-            <line x1="0" y1="130" x2="320" y2="130" />
-            <line x1="0" y1="155" x2="320" y2="155" />
-          </g>
-        </>
-      ) : (
-        <>
-          <polygon points="0,108 80,92 200,100 320,86 320,108" fill="#0c2a40" />
-          <rect x="64" y="118" width="24" height="20" rx="2" fill="#2a5a86" stroke="#5eead4" strokeWidth="0.5" />
-          <rect x="224" y="112" width="46" height="30" rx="2" fill="#1f4a6e" stroke="#5eead4" strokeWidth="0.5" />
-          <g stroke="#5eead4" strokeWidth="0.25" opacity="0.15">
-            <line x1="160" y1="108" x2="50"  y2="180" />
-            <line x1="160" y1="108" x2="120" y2="180" />
-            <line x1="160" y1="108" x2="170" y2="180" />
-            <line x1="160" y1="108" x2="220" y2="180" />
-            <line x1="0" y1="132" x2="320" y2="132" />
-            <line x1="0" y1="158" x2="320" y2="158" />
-          </g>
-        </>
-      )}
-      <g stroke="#5eead4" strokeWidth="0.5" opacity="0.4">
-        <line x1="155" y1="90" x2="165" y2="90" />
-        <line x1="160" y1="85" x2="160" y2="95" />
-      </g>
-    </svg>
-  );
-}
-
 function CameraPanel({
   index,
   cameraTopics,
@@ -871,7 +795,7 @@ function CameraPanel({
   connected: boolean;
   now: number;
 }) {
-  const allTopics = cameraTopics.length > 0 ? cameraTopics : DUMMY_CAM_TOPICS;
+  const allTopics = cameraTopics;
   const [selectedIdx, setSelectedIdx] = useState(index < allTopics.length ? index : 0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [imageOk, setImageOk] = useState(true);
@@ -966,23 +890,19 @@ function CameraPanel({
             alt={`Camera ${index + 1}`}
             onError={() => setImageOk(false)}
           />
-        ) : status === "err" ? (
-          <div className="cam-nodata"><div className="cam-nodata-msg">no signal</div></div>
         ) : (
-          <MockCamFeed scene={(index % 2) as 0 | 1} />
+          <div className="cam-nodata"><div className="cam-nodata-msg">no signal</div></div>
         )}
         <div className="cam-feed-overlay">
-          <div className="cam-feed-corner tl"><em>cam</em> {index === 0 ? "front" : "rear"}</div>
-          <div className="cam-feed-corner tr"><em>res</em> 1280×720</div>
-          <div className="cam-feed-corner bl"><em>exposure</em> auto</div>
-          {status === "ok" && <div className="cam-feed-corner br">● {connected ? "LIVE" : "MOCK"}</div>}
+          <div className="cam-feed-corner tl"><em>cam</em> front</div>
+          {status === "ok" && showReal && <div className="cam-feed-corner br">● LIVE</div>}
         </div>
       </div>
     </div>
   );
 }
 
-// ── Stack status panels (v2: supervisor + terrain publisher) ─────────────────
+// ── Status panels: localization supervisor and terrain node ──────────────────
 
 function StatusKv({ label, value, unit, cls }: { label: string; value: React.ReactNode; unit?: string; cls?: string }) {
   return (
@@ -1007,7 +927,7 @@ function LocalizationPanel({ frame }: { frame: TelemetryFrame }) {
           <div className="robot-name">Localization</div>
           <div className={`robot-status-badge ${cls}`}>{loc ? loc.state.toUpperCase() : "N/A"}</div>
         </div>
-        <div className="robot-task">{loc ? loc.reason : "no supervisor status (legacy stack or not started)"}</div>
+        <div className="robot-task">{loc ? loc.reason : "no supervisor status (not started)"}</div>
         <div className="robot-kv-grid">
           <StatusKv label="Motion" value={loc ? (loc.motionPermitted ? "permitted" : "held") : "–"} cls={loc && !loc.motionPermitted ? "warn" : undefined} />
           <StatusKv label="GLIM epoch" value={loc ? loc.epoch : "–"} />
@@ -1032,7 +952,7 @@ function TerrainPanel({ frame }: { frame: TelemetryFrame }) {
           <div className={`robot-status-badge ${cls}`}>{!t ? "N/A" : t.valid ? "VALID" : "INVALID"}</div>
         </div>
         <div className="robot-task">
-          {!t ? "no v2 terrain status" : t.failure ? t.failure : `epoch ${t.epoch ?? "–"} · ${t.projected} windows · status ${ageLabel(t.stamp, now)}`}
+          {!t ? "no terrain status (not started)" : t.failure ? t.failure : `epoch ${t.epoch ?? "–"} · ${t.projected} windows · status ${ageLabel(t.stamp, now)}`}
         </div>
         <div className="robot-kv-grid">
           <StatusKv label="Chunks in" value={t ? t.received : "–"} />
@@ -1069,7 +989,6 @@ function RobotStatusPanel({ robot, frame }: { robot: RobotState | undefined; fra
 
   const topics = frame.topics;
   const slamFresh = topics["slam/pose_corrected"]?.stamp;
-  const lidarFresh = topics["lidar_0/pointcloud/filtered"]?.stamp;
   const topicCount = Object.keys(topics).length;
   const slamError = robot.pose && robot.gtPose ? Math.hypot(robot.pose.x - robot.gtPose.x, robot.pose.y - robot.gtPose.y) : null;
 
@@ -1113,10 +1032,7 @@ function RobotStatusPanel({ robot, frame }: { robot: RobotState | undefined; fra
           </div>
           <div className="robot-kv">
             <div className="robot-kv-lbl">SLAM age</div>
-            <div className="robot-kv-val">
-              {ageLabel(slamFresh, Date.now() / 1000)}
-              {lidarFresh && <span className="unit"> · lid {ageLabel(lidarFresh, Date.now() / 1000)}</span>}
-            </div>
+            <div className="robot-kv-val">{ageLabel(slamFresh, Date.now() / 1000)}</div>
           </div>
         </div>
       </div>
@@ -1240,10 +1156,8 @@ function SparkRow({
 
 // ── TopicFreqsPanel ──────────────────────────────────────────────────────────
 
-const LEGACY_RATE_SERIES = ["LiDAR Hz", "IMU Hz", "SLAM pose Hz", "Voxel map Hz", "BEV map Hz", "Camera Hz"];
-
 function TopicFreqsPanel({ series, rateSeries }: { series: Record<string, number[]>; rateSeries?: string[] }) {
-  const keys = [...(rateSeries ?? LEGACY_RATE_SERIES), "Sim speed"].map((key) => ({
+  const keys = [...(rateSeries ?? []), "Sim speed"].map((key) => ({
     key,
     unit: key === "Sim speed" ? "×" : "Hz",
   }));
@@ -1304,7 +1218,7 @@ function StatusFooter({
 }) {
   const now = Date.now() / 1000;
   const connClass = frame.connected ? "ok" : "warn";
-  const connLabel = frame.connected ? "live" : "mock";
+  const connLabel = frame.connected ? "live" : "offline";
   const topicCount = Object.keys(frame.topics).length;
 
   const slamTopic = frame.topics["slam/pose_corrected"];
@@ -1385,8 +1299,7 @@ function EventsPanel({ events, onClose }: { events: TelemetryFrame["events"]; on
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
-  const [scenario, setScenario] = useState<MockScenario>("nominal");
-  const frame = useTelemetry(scenario);
+  const frame = useTelemetry();
   const [activeLayer, setActiveLayer] = useState(URL_PARAMS.get("layer") ?? "obstacle");
   const [showTrajectory, setShowTrajectory] = useState(true);
   const [showPlan, setShowPlan] = useState(true);
@@ -1395,19 +1308,12 @@ function App() {
 
   const robot = frame.robots[0];
 
-  // Build fleet entries: real robot first, then mock extras when disconnected
-  const liveEntry: FleetEntry | undefined = robot
-    ? {
-        id: robot.name,
-        name: robot.name,
-        status: severityToStatus(robot.severity),
-        task: robot.statusText,
-        battery: frame.connected ? -1 : 0.74, // not in the backend schema: hidden when live
-      }
-    : undefined;
-  const fleetEntries: FleetEntry[] = liveEntry
-    ? (frame.connected ? [liveEntry] : [liveEntry, ...MOCK_FLEET_EXTRA])
-    : MOCK_FLEET_EXTRA;
+  const fleetEntries: FleetEntry[] = frame.robots.map((r) => ({
+    id: r.name,
+    name: r.name,
+    status: frame.connected ? severityToStatus(r.severity) : "off",
+    task: frame.connected ? r.statusText : "backend offline",
+  }));
   const fleetOnline = fleetEntries.filter((r) => r.status !== "off").length;
 
   // Banner status
@@ -1428,8 +1334,6 @@ function App() {
         frame={frame}
         fleetTotal={fleetEntries.length}
         fleetOnline={fleetOnline}
-        scenario={scenario}
-        setScenario={setScenario}
       />
       <FleetSidebar entries={fleetEntries} selectedId={selectedRobotId} onSelect={setSelectedRobotId} />
       <div className="main">
@@ -1468,22 +1372,17 @@ function App() {
           />
           <div className="right-col">
             <div className="cam-row">
-              {/* Live runs without a camera (v2 sim nav stream) show the stack status instead; with
-                  one (v2_demo.sh --camera) the camera sits beside the localization supervisor. */}
-              {frame.connected && frame.cameraTopics.length === 0 ? (
-                <>
-                  <LocalizationPanel frame={frame} />
-                  <TerrainPanel frame={frame} />
-                </>
-              ) : frame.connected && frame.localization ? (
+              {/* Runs without a camera show the supervisor and terrain status; with one
+                  (run_mission.sh --camera) the camera sits beside the localization supervisor. */}
+              {frame.connected && frame.cameraTopics.length > 0 ? (
                 <>
                   <CameraPanel index={0} cameraTopics={frame.cameraTopics} topics={frame.topics} connected={frame.connected} now={frame.stamp} />
                   <LocalizationPanel frame={frame} />
                 </>
               ) : (
                 <>
-                  <CameraPanel index={0} cameraTopics={frame.cameraTopics} topics={frame.topics} connected={frame.connected} now={frame.stamp} />
-                  <CameraPanel index={1} cameraTopics={frame.cameraTopics} topics={frame.topics} connected={frame.connected} now={frame.stamp} />
+                  <LocalizationPanel frame={frame} />
+                  <TerrainPanel frame={frame} />
                 </>
               )}
             </div>

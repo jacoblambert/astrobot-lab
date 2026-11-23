@@ -96,8 +96,6 @@ export interface TelemetryFrame {
   series: Record<string, number[]>;
   topics: Record<string, { stamp: number; count: number; hz?: number }>;
   events: Array<{ stamp: number; severity: Severity; text: string; source: string }>;
-  /** Optional (newer backends): "legacy" | "v2". */
-  stack?: string;
   simTime?: number | null;
   /** Sim seconds per wall second. */
   simSpeed?: number | null;

@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+# Copyright 2026 Jacob Lambert
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Read-only ROS 2 to FastAPI bridge for the Astrobot console."""
 
 from __future__ import annotations
@@ -23,17 +37,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from geometry_msgs.msg import PoseArray, PoseStamped
 from nav_msgs.msg import OccupancyGrid, Path
 from pydantic import BaseModel
-from sensor_msgs.msg import Imu, PointCloud2
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, Imu
 from std_msgs.msg import String
 
-try:  # astrobot_interfaces is optional for the legacy console
-    from astrobot_interfaces.msg import LocalizationStatus
-except ImportError:  # pragma: no cover
-    LocalizationStatus = None
+from astrobot_interfaces.msg import LocalizationStatus
 
 # Per-goal bookkeeping the event log would drown in (goal_sent already marks each goal).
 QUIET_MISSION_EVENTS = {"goal_accepted", "planner_precheck_started"}
@@ -47,33 +57,17 @@ TRAIL_SPACING_M = 0.1
 TRAIL_LIMIT = 3000
 LOCALIZATION_STATES = ("starting", "healthy", "degraded", "stopping", "reinitializing", "rebuilding", "faulted")
 
-# Per-stack inputs. Rates come from small topics only (raw, never deserialized): a console
-# subscribing to point clouds adds DDS/CPU load to a behaviour run (observer effect).
-STACKS: dict[str, dict[str, Any]] = {
-    "legacy": {
-        "maps": {"obstacle": "slam/bev_costmap"},
-        "rates": [
-            ("lidar_0/pointcloud/filtered", PointCloud2, "LiDAR Hz"),
-            ("imu", Imu, "IMU Hz"),
-            ("slam/prob_voxel_map", PointCloud2, "Voxel map Hz"),
-        ],
-        "map_rates": {"obstacle": "BEV map Hz"},
-    },
-    "v2": {
-        # global_costmap: Nav2 costs on the persistent mosaic; exploration_map: observed
-        # free/occupied/unknown; planner_costmap: the 6 m window Nav2's local costmap reads.
-        "maps": {
-            "obstacle": "/terrain_shadow/global_costmap",
-            "explore": "/terrain_shadow/exploration_map",
-            "local": "/terrain_shadow/planner_costmap",
-        },
-        "rates": [("imu_physics", Imu, "IMU Hz")],
-        "map_rates": {"local": "Terrain window Hz", "obstacle": "Mosaic Hz"},
-        # RTK-anchored map = world - home (v2_slam.launch.py synthetic_rtk home_xy -20, -20): the
-        # GT overlay and SLAM error use this exact transform instead of a fit to the SLAM path.
-        "gt_to_map": (20.0, 20.0, 0.0),
-    },
+# Terrain layers: global_costmap holds Nav2 costs on the persistent mosaic, exploration_map the
+# observed free/occupied/unknown classes, local_costmap the 6 m window Nav2's local costmap reads.
+TERRAIN_MAPS = {
+    "obstacle": "terrain/global_costmap",
+    "explore": "terrain/exploration_map",
+    "local": "terrain/local_costmap",
 }
+MAP_RATE_NAMES = {"local": "Terrain window Hz", "obstacle": "Mosaic Hz"}
+# Rates come from small topics only (raw, never deserialized): a console subscribing to point
+# clouds adds DDS/CPU load to a behaviour run (observer effect).
+RATE_TOPICS = [("imu_physics", Imu, "IMU Hz")]
 
 
 def yaw_from_quaternion(q: Any) -> float:
@@ -105,10 +99,9 @@ def pose_msg_to_dict(msg: PoseStamped) -> dict[str, float]:
     }
 
 
-# GLIM's slam/pose_corrected is the IMU sensor pose: offset and pi-rotated from
-# base_link (must match slam_map_to_odom_tf_node / tools/map_gt_alignment.py).
-# Converting at ingestion keeps the displayed rover pose, trajectory, home pose
-# and the GT alignment fit all consistently in base_link/map coordinates.
+# GLIM's slam/pose_corrected is the IMU sensor pose: offset and pi-rotated from base_link
+# (astrobot_bringup/config/robot.yaml, and the map_to_odom_tf node in mission.launch.py).
+# Converting at ingestion keeps the displayed rover pose and trajectory in base_link/map coordinates.
 IMU_BASE_X = 0.264
 IMU_BASE_Y = 0.017
 IMU_BASE_YAW = math.pi
@@ -136,7 +129,7 @@ def path_msg_to_list(msg: Path, limit: int = 600) -> list[dict[str, float]]:
 def occupancy_grid_to_dict(
     msg: OccupancyGrid,
     max_cells: int = 400_000,
-    gt_to_map_transform: tuple[float, float, float] | None = None,
+    gt_to_map_transform: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> dict[str, Any]:
     width = int(msg.info.width)
     height = int(msg.info.height)
@@ -148,21 +141,14 @@ def occupancy_grid_to_dict(
     origin_y = float(msg.info.origin.position.y)
     origin_yaw = yaw_from_quaternion(msg.info.origin.orientation)
     if source_frame == "gt_map":
-        # OmniLRS GT/resource maps use positive yard coordinates. For UI overlay,
-        # display them in the robot-local SLAM/Nav2 map frame anchored at start.
+        # OmniLRS GT/resource maps are in world (yard) coordinates: display them in the map frame.
         display_frame = "map"
-        if gt_to_map_transform is not None:
-            offset_x, offset_y, offset_yaw = gt_to_map_transform
-            cos_yaw = math.cos(offset_yaw)
-            sin_yaw = math.sin(offset_yaw)
-            transformed_x = offset_x + cos_yaw * origin_x - sin_yaw * origin_y
-            transformed_y = offset_y + sin_yaw * origin_x + cos_yaw * origin_y
-            origin_x = transformed_x
-            origin_y = transformed_y
-            origin_yaw = normalize_angle(origin_yaw + offset_yaw)
-        else:
-            origin_x -= 0.5 * float(width) * float(msg.info.resolution)
-            origin_y -= 0.5 * float(height) * float(msg.info.resolution)
+        offset_x, offset_y, offset_yaw = gt_to_map_transform
+        cos_yaw = math.cos(offset_yaw)
+        sin_yaw = math.sin(offset_yaw)
+        origin_x, origin_y = (offset_x + cos_yaw * origin_x - sin_yaw * origin_y,
+                              offset_y + sin_yaw * origin_x + cos_yaw * origin_y)
+        origin_yaw = normalize_angle(origin_yaw + offset_yaw)
     grid = np.frombuffer(bytes(msg.data), dtype=np.int8, count=width * height).reshape(height, width)
     if stride > 1:
         # Max-pool (unknown -1 < free 0 < cost): striding would drop small rocks between samples.
@@ -250,7 +236,6 @@ def severity_from_diagnostics(diagnostics: dict[str, Any], mission: dict[str, An
     }
     warning_reasons = {
         "planned_path_intersects_gt_obstacle_corridor",
-        "planned_path_intersects_bev_high_cost",
         "planned_path_intersects_nav2_global_high_cost",
         "selected_goal_near_gt_obstacle",
         "nav2_feedback_no_distance_progress",
@@ -340,17 +325,9 @@ class UiBridgeNode(Node):
         self._lock = threading.RLock()
         self._state = BridgeState()
         self._last_grid_conversion: dict[str, float] = {}
-        self._latest_grid_msgs: dict[str, OccupancyGrid] = {}
         self._map_versions: dict[str, int] = {}
         self._grid_content: dict[str, tuple[Any, ...]] = {}
         self._grid_conversion_min_period_sec = 0.5
-        self._gt_home_pose: dict[str, float] | None = None
-        self._slam_home_pose: dict[str, float] | None = None
-        self._gt_to_map_transform: tuple[float, float, float] | None = None
-        # Windowed least-squares gt->map alignment (positions only -- yaw diffs from
-        # single quaternions are fragile; the IMU-frame pi rotation poisoned them).
-        self._align_pairs: list[tuple[float, float, float, float]] = []  # (gt_x, gt_y, map_x, map_y)
-        self._align_fitted = False
         self._last_gt_pose: dict[str, float] | None = None
         self._clock_samples: list[tuple[float, float]] = []  # (wall, sim) for the sim speed
         self._terrain_received: deque = deque()  # (sim time, chunks received) for the chunk rate
@@ -359,26 +336,20 @@ class UiBridgeNode(Node):
         self.gt_rocks: list[dict[str, float]] = []
         self._mission_started_sim: float | None = None  # from exploration events (stamp - elapsed_sec)
 
-        # legacy: BEV mapper (phase2_slam). v2: v2 terrain publisher + supervisor (slam_stack:=v2).
-        self.stack = str(self.declare_parameter("stack", "legacy").value)
-        if self.stack not in STACKS:
-            raise ValueError(f"unknown stack {self.stack!r}; expected one of {sorted(STACKS)}")
-        stack = STACKS[self.stack]
         self.footprint = {
             "halfLength": float(self.declare_parameter("footprint_half_length_m", 0.495).value),
             "halfWidth": float(self.declare_parameter("footprint_half_width_m", 0.335).value),
         }
-        maps = dict(stack["maps"])
-        override = str(self.declare_parameter("obstacle_map_topic", "").value)
-        if override:
-            maps["obstacle"] = override
-        self._map_rate_names = {maps[k]: name for k, name in stack["map_rates"].items() if k in maps}
-        self.rate_series = [name for _, _, name in stack["rates"]] + list(stack["map_rates"].values()) + ["SLAM pose Hz"]
-        if stack.get("gt_to_map") is not None:
-            self._gt_to_map_transform = tuple(float(v) for v in stack["gt_to_map"])
-            self._align_fitted = True  # known, never refit from the SLAM path
+        # The RTK-anchored map frame is world - home (home_xy as in astrobot_bringup/config/sim.yaml):
+        # the GT overlay and the SLAM error use this exact transform.
+        home_x, home_y = (float(v) for v in self.declare_parameter("home_xy", [-20.0, -20.0]).value)
+        self._gt_to_map_transform = (-home_x, -home_y, 0.0)
+        maps = dict(TERRAIN_MAPS)
+        self._map_rate_names = {maps[k]: name for k, name in MAP_RATE_NAMES.items()}
+        self.rate_series = (["Native chunks Hz"] + [name for _, _, name in RATE_TOPICS]
+                            + list(MAP_RATE_NAMES.values()) + ["SLAM pose Hz"])
         scene = str(self.declare_parameter("gt_scene_path", "").value)
-        if scene and self._gt_to_map_transform is not None:
+        if scene:
             try:
                 self.gt_rocks = load_gt_rocks(scene, self._gt_to_map_transform)
             except (OSError, ValueError, KeyError) as exc:
@@ -393,14 +364,11 @@ class UiBridgeNode(Node):
             depth=5,
             reliability=ReliabilityPolicy.BEST_EFFORT,
         )
-        self._rate_names = {topic: name for topic, _, name in stack["rates"]} | {"slam/pose_corrected": "SLAM pose Hz"}
-        for topic, msg_type, _ in stack["rates"]:
+        self._rate_names = {topic: name for topic, _, name in RATE_TOPICS} | {"slam/pose_corrected": "SLAM pose Hz"}
+        for topic, msg_type, _ in RATE_TOPICS:
             self.create_subscription(msg_type, topic, self._freshness_cb(topic), sensor_qos, raw=True)
-        if self.stack == "v2":
-            self.rate_series.insert(0, "Native chunks Hz")
-            self.create_subscription(String, "/terrain_shadow/status", self._terrain_cb, 10)
-            if LocalizationStatus is not None:
-                self.create_subscription(LocalizationStatus, "localization/status", self._localization_cb, 10)
+        self.create_subscription(String, "terrain/status", self._terrain_cb, 10)
+        self.create_subscription(LocalizationStatus, "localization/status", self._localization_cb, 10)
         self.create_subscription(String, "exploration/events", self._mission_event_cb, 20)
         self.create_subscription(PoseStamped, "slam/pose_corrected", self._pose_cb, 20)
         self.create_subscription(PoseStamped, "/gt/base_link_pose", self._gt_pose_cb, 10)
@@ -410,7 +378,6 @@ class UiBridgeNode(Node):
         self.create_subscription(String, "diagnostics", self._diagnostics_cb, 10)
         self.create_subscription(String, "exploration/status", self._mission_cb, 10)
         self.create_subscription(Image, "camera_0/image_raw", self._camera_cb("camera_0/image_raw"), sensor_qos)
-        self.create_subscription(Image, "/front_camera/mono/rgb", self._camera_cb("camera_0/image_raw"), sensor_qos)
         self.teleop_goal_pub = self.create_publisher(PoseStamped, "teleop/goal", 10)
 
     def _touch(self, topic: str) -> None:
@@ -461,7 +428,6 @@ class UiBridgeNode(Node):
     def _grid_cb(self, layer_name: str, topic: str, msg: OccupancyGrid) -> None:
         now = time.monotonic()
         with self._lock:
-            self._latest_grid_msgs[layer_name] = msg
             last = self._last_grid_conversion.get(layer_name, 0.0)
             if now - last < self._grid_conversion_min_period_sec:
                 self._touch(topic)
@@ -490,30 +456,10 @@ class UiBridgeNode(Node):
         # Convert IMU-frame SLAM pose to base_link once, at ingestion.
         pose = slam_pose_to_base(pose_msg_to_dict(msg))
         with self._lock:
-            if self._slam_home_pose is None:
-                self._slam_home_pose = pose
-                self._update_gt_to_map_offset()
-            # Collect matched (gt, map/base) position pairs for the LS alignment fit.
-            if not self._align_fitted and self._last_gt_pose is not None:
-                if abs(float(self._last_gt_pose["stamp"]) - float(pose["stamp"])) <= 0.15:
-                    self._align_pairs.append(
-                        (float(self._last_gt_pose["x"]), float(self._last_gt_pose["y"]),
-                         float(pose["x"]), float(pose["y"]))
-                    )
-                    if len(self._align_pairs) > 600:
-                        del self._align_pairs[: len(self._align_pairs) - 600]
-                    # Yaw is only observable once the trajectory has spatial spread
-                    # (pairs collected while parked at spawn are degenerate).
-                    if len(self._align_pairs) >= 60:
-                        xs = [p[2] for p in self._align_pairs]
-                        ys = [p[3] for p in self._align_pairs]
-                        if (max(xs) - min(xs)) + (max(ys) - min(ys)) >= 1.5:
-                            self._fit_gt_to_map()
             self._state.poses[self.robot_namespace] = pose
-            if self.stack != "legacy":
-                gt = self._gt_in_map(self._last_gt_pose)
-                if gt is not None and abs(gt["stamp"] - pose["stamp"]) <= 0.15:
-                    self._append_series("SLAM error", math.hypot(pose["x"] - gt["x"], pose["y"] - gt["y"]))
+            gt = self._gt_in_map(self._last_gt_pose)
+            if gt is not None and abs(gt["stamp"] - pose["stamp"]) <= 0.15:
+                self._append_series("SLAM error", math.hypot(pose["x"] - gt["x"], pose["y"] - gt["y"]))
             trail_append(self._state.trajectories.setdefault(self.robot_namespace, []), pose)
             self._touch("slam/pose_corrected")
 
@@ -521,15 +467,12 @@ class UiBridgeNode(Node):
         pose = pose_msg_to_dict(msg)
         with self._lock:
             self._last_gt_pose = pose
-            if self._gt_home_pose is None:
-                self._gt_home_pose = pose
-                self._update_gt_to_map_offset()
             trail_append(self._state.gt_trajectory, pose)
             self._touch("/gt/base_link_pose")
 
     def _gt_in_map(self, pose: dict[str, float] | None) -> dict[str, float] | None:
         """A GT (gt_map) pose in the display map frame: evaluator overlay only, never fed back."""
-        if pose is None or self._gt_to_map_transform is None:
+        if pose is None:
             return None
         tx, ty, yaw = self._gt_to_map_transform
         c, s = math.cos(yaw), math.sin(yaw)
@@ -590,7 +533,7 @@ class UiBridgeNode(Node):
             while chunks and sim_now - chunks[0][0] > RATE_WINDOW_SIM_S:
                 chunks.popleft()
             self._state.terrain = value
-            self._touch("/terrain_shadow/status")
+            self._touch("terrain/status")
 
     def _mission_event_cb(self, msg: String) -> None:
         try:
@@ -629,68 +572,13 @@ class UiBridgeNode(Node):
         (w0, s0), (w1, s1) = samples[0], samples[-1]
         return (s1 - s0) / (w1 - w0) if w1 - w0 >= 2.0 else None
 
-    def _update_gt_to_map_offset(self) -> None:
-        """Initial gt->map transform: translation-only from the home poses.
-
-        Empirically map->world is near-pure translation (LS fits across runs:
-        yaw < 1 deg, rms < 5 cm), so this is already close; the windowed LS fit
-        in _fit_gt_to_map() refines yaw+translation once enough pairs exist.
-        Never derive yaw from single-pose quaternion differences (the IMU-frame
-        pi rotation made that produce a bogus ~180 deg yaw before).
-        """
-        if self._gt_home_pose is None or self._align_fitted:
-            return
-        slam_home = self._slam_home_pose or {"x": 0.0, "y": 0.0}
-        self._gt_to_map_transform = (
-            float(slam_home["x"]) - float(self._gt_home_pose["x"]),
-            float(slam_home["y"]) - float(self._gt_home_pose["y"]),
-            0.0,
-        )
-        self._rerender_gt_layers()
-
-    def _fit_gt_to_map(self) -> None:
-        """Least-squares planar yaw+translation (gt -> map) over collected pairs.
-
-        Same math as slam_eval/compare_tum_trajectories.align_yaw_translation /
-        tools/map_gt_alignment.py (reference = map/base positions, estimate = gt).
-        """
-        pairs = self._align_pairs
-        n = len(pairs)
-        if n < 10:
-            return
-        gt_cx = sum(p[0] for p in pairs) / n
-        gt_cy = sum(p[1] for p in pairs) / n
-        mp_cx = sum(p[2] for p in pairs) / n
-        mp_cy = sum(p[3] for p in pairs) / n
-        sxx = sxy = 0.0
-        for gx, gy, mx, my in pairs:
-            ex, ey = gx - gt_cx, gy - gt_cy
-            rx, ry = mx - mp_cx, my - mp_cy
-            sxx += ex * rx + ey * ry
-            sxy += ex * ry - ey * rx
-        yaw = math.atan2(sxy, sxx)
-        c, s = math.cos(yaw), math.sin(yaw)
-        self._gt_to_map_transform = (
-            mp_cx - (c * gt_cx - s * gt_cy),
-            mp_cy - (s * gt_cx + c * gt_cy),
-            yaw,
-        )
-        self._align_fitted = True
-        self._align_pairs = []
-        self._rerender_gt_layers()
-
-    def _rerender_gt_layers(self) -> None:
-        for layer_name, msg in self._latest_grid_msgs.items():
-            if msg.header.frame_id == "gt_map":
-                self._set_map(layer_name, occupancy_grid_to_dict(msg, gt_to_map_transform=self._gt_to_map_transform))
-
     def _goal_cb(self, msg: PoseStamped) -> None:
         with self._lock:
             self._state.goal = pose_msg_to_dict(msg)
             self._touch("exploration/selected_goal")
 
     def _candidates_cb(self, msg: PoseArray) -> None:
-        # exploration_manager publishes its ranked candidates (best first) each planning cycle.
+        # The exploration manager publishes its ranked candidates (best first) each planning cycle.
         with self._lock:
             self._candidates = [{"x": round(p.position.x, 3), "y": round(p.position.y, 3)} for p in msg.poses]
             self._touch("exploration/frontiers")
@@ -709,9 +597,6 @@ class UiBridgeNode(Node):
             self._state.diagnostics = parsed
             nav = parsed.get("nav", {}) if isinstance(parsed, dict) else {}
             feedback = nav.get("feedback", {}) if isinstance(nav, dict) else {}
-            motion = nav.get("motion", {}) if isinstance(nav, dict) else {}
-            if self.stack == "legacy":  # other stacks score SLAM against their exact GT transform
-                self._append_series("SLAM error", motion.get("position_error_m"))
             self._append_series("Goal distance", feedback.get("distance_remaining_m"))
             self._touch("diagnostics")
 
@@ -794,7 +679,6 @@ class UiBridgeNode(Node):
                 "schemaVersion": "astrobot.console.v1",
                 "stamp": time.time(),
                 "connected": True,
-                "stack": self.stack,
                 "simTime": sim_time if sim_time > 0 else None,
                 "simSpeed": sim_speed,
                 "rateSeries": list(self.rate_series),
