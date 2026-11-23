@@ -13,3 +13,7 @@ __pycache__/
 node_modules/
 ui/**/dist/
 ui/**/*.tsbuildinfo
+
+# Mission run outputs (scripts/run_mission.sh)
+runs/*
+!runs/.gitkeep

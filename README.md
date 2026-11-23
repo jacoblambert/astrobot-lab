@@ -1,469 +1,72 @@
-# astrobot-lab
+# Astrobot
 
-Current development follows [Implementation plan v2 — local terrain](docs/implementation/implementation-plan-v2.md).
-See the [agent runbook](docs/implementation/agent-runbook.md) for test environments and guarded runners,
-and the [experiment ledger](docs/implementation/implementation-plan.md) for measured results and remaining gates.
-The local reconstruction prototype is offline/advisory; it is not connected to navigation.
+Single-rover lunar autonomy in simulation: a rover explores a rock-strewn lunar yard in
+[OmniLRS](https://github.com/OmniLRS/OmniLRS) (NVIDIA Isaac Sim), localizes with GLIM LiDAR-IMU
+SLAM anchored by RTK-style absolute fixes, builds a local geometric terrain map from raw LiDAR
+returns, drives with Nav2, and runs a mission (coverage of a disc around home, or a resource
+search and return) through a pluggable mission manager.
 
-## Quick Start
+Release 0.1 is a **simulation and demo** release. It is not ready for hardware: the absolute
+fixes come from simulator ground truth and the terrain input is the simulator's native LiDAR
+stream. The flight-path packages are C++ (ROS 2 Jazzy on a Space ROS base image); making them
+Space ROS compliant is the goal of 0.2.
 
-### 1. Prep the repo
+| Mission gates (seeds 42 / 411 / 7), 2026-11-21 | Result |
+|---|---|
+| explore_radius: coverage >= 0.70 of an 8 m disc, home <= 1 m | 3 / 3 (coverage 0.77-0.81, home 0.29-0.77 m) |
+| sample_return: sample >= 0.75, home <= 1 m | 3 / 3 (sample 0.751-0.757, home 0.47-0.81 m) |
+| GT rock contacts (>= 0.10 m rocks) | 0 |
 
-```bash
-git clone <your-fork-or-repo-url>
-cd astrobot-lab
-git submodule update --init --recursive
-```
+An RTK outage (10 s every 300 sim-s) holds motion within 2 s, restarts SLAM and resumes the
+mission ([docs/running.md](docs/running.md#fault-injection-rtk-outage)).
 
-If needed, adjust container UID/GID defaults in `.env`.
+## Quick start
 
-### 2. Build the Isaac Sim image
-
-```bash
-./docker/build_omnilrs_base.sh
-```
-
-This builds `isaac-sim-omnilrs:latest` from `OmniLRS/omnilrs.docker/Dockerfile`.
-
-### 3. Use a shared ROS 2 domain (177)
-
-All compose files and devcontainers are pinned to:
-- `ROS_DOMAIN_ID=177`
-- `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`
-- `CYCLONEDDS_URI=file:///config/cyclonedds_config.xml`
-
-If you run OmniLRS directly (outside compose), export the same values:
+Requirements: an NVIDIA GPU with the container toolkit, Docker Compose v2, about 40 GB disk.
 
 ```bash
-export ROS_DOMAIN_ID=177
-export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-export CYCLONEDDS_URI=file:///config/cyclonedds_config.xml
+git clone --recursive <repo> astrobot && cd astrobot
+./docker/build_omnilrs_base.sh                  # Isaac Sim + OmniLRS image (isaac-sim-omnilrs)
+docker compose build astrobot-dev                 # ROS 2 workspace image (astrobot-dev)
+scripts/run_mission.sh 42 explore_radius --console
 ```
 
-### 4. Run Lunaryard 40m + Space ROS (same Docker network)
-
-Headless is the default:
+`run_mission.sh <seed> <mission> [--eval] [--console] [--camera]` starts the workspace
+container (building the packages on first start), brings up the lunar yard for the seed, waits
+for the simulator stream, launches the mission and, with `--console`, starts the console backend. Then run the frontend
+and open http://localhost:5173:
 
 ```bash
-docker compose -f docker-compose.lunaryard.yml up -d
-docker compose -f docker-compose.lunaryard.yml logs -f astrobot-sim
+cd ui/astrobot-console && npm install && npm run dev
 ```
 
-For a local X11-backed Isaac Sim window, keep the same compose file and switch with env vars:
-
-```bash
-xhost +local:root
-DISPLAY=${DISPLAY:-:0} OMNILRS_HEADLESS=false docker compose -f docker-compose.lunaryard.yml up -d
-docker compose -f docker-compose.lunaryard.yml logs -f astrobot-sim
-```
-
-The sim service now uses:
-- `OMNILRS_HEADLESS=true|false`
-- `OMNILRS_ENVIRONMENT=lunaryard_40m|lunalab|...`
-- `OMNILRS_ROCKS_ENABLED=true|false`
-- `OMNILRS_GT_TF_ENABLED=true|false`
-
-If GUI mode is requested without `DISPLAY`, the sim exits early with a clear error instead of silently starting with no window.
-
-For Lunaryard runs, rock generation is best controlled at startup rather than with the runtime
-visibility topic. Examples:
-
-```bash
-OMNILRS_ROCKS_ENABLED=true docker compose -f docker-compose.lunaryard.yml up -d --force-recreate astrobot-sim
-OMNILRS_ROCKS_ENABLED=false docker compose -f docker-compose.lunaryard.yml up -d --force-recreate astrobot-sim
-```
-
-This sets `environment.rocks_settings.enable` in the selected OmniLRS environment config before the scene is built.
-
-For Phase 2 SLAM evaluation, keep simulator GT enabled and use it only as the
-safe driving/evaluation reference. Do not disable simulator-owned `map -> odom`
-for Phase 2 runs; SLAM-frame navigation starts in Phase 3 after a SLAM-derived
-BEV map exists.
-
-Open a shell in the dev container:
-
-```bash
-docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash
-source /etc/ros_setup.sh
-export ROS_DOMAIN_ID=177
-export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-export CYCLONEDDS_URI=file:///config/cyclonedds_config.xml
-ros2 topic list
-```
-
-### 5. Open Foxglove from your local machine
-
-`astrobot-dev` includes `ros-jazzy-foxglove-bridge`, and `docker-compose.lunaryard.yml`
-publishes it on `127.0.0.1:8765` on the remote host.
-
-For remote viewing, the current Lunaryard robot streams are namespaced under
-`/astrobot_0` and tuned to roughly:
-- `/astrobot_0/camera_0/image_raw` at ~10 Hz
-- `/astrobot_0/lidar_0/pointcloud/raw` at ~10 Hz
-
-Start the bridge:
-
-```bash
-docker compose -f docker-compose.lunaryard.yml exec -d astrobot-dev bash -lc \
-  'source /etc/ros_setup.sh && exec ros2 launch foxglove_bridge foxglove_bridge_launch.xml address:=0.0.0.0 port:=8765'
-```
-
-Forward the port from your laptop:
-
-```bash
-ssh -L 8765:localhost:8765 <user>@<remote-host>
-```
-
-Then connect from Foxglove Desktop or `https://app.foxglove.dev` to:
-
-```text
-ws://localhost:8765
-```
-
-### 6. Prepare the local ROS workspace
-
-`astrobot-dev` auto-builds the mounted ROS workspace at container startup. If you
-change ROS code while the container is already running, recreate the dev service
-instead of doing a manual post-launch build:
-
-```bash
-docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate astrobot-dev
-```
-
-### 7. Launch Phase 1 navigation
-
-```bash
-docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
-  'source /etc/ros_setup.sh && ros2 launch astrobot_launch phase1_nav.launch.py'
-```
-
-This brings up:
-- OmniLRS simulator-side GT publishing `/gt/map` and `gt_map -> odom`
-- `basic_control` muxing `/astrobot_0/cmd_vel_nav` and `/astrobot_0/cmd_vel_teleop` into `/astrobot_0/cmd_vel`
-- Nav2 `planner_server`, `controller_server`, and `bt_navigator`
-- Lunaryard Husky drive tuning with:
-  - high wheel damping for velocity control
-  - XT32M2X-style lidar timing
-  - simulator-side GT `gt_map -> odom` publishing at 30 Hz
-
-Send a simple goal:
-
-```bash
-docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
-  'source /etc/ros_setup.sh && ros2 action send_goal /astrobot_0/navigate_to_pose nav2_msgs/action/NavigateToPose "{pose: {header: {frame_id: gt_map}, pose: {position: {x: 22.0, y: 18.0, z: 0.0}, orientation: {w: 1.0}}}}"'
-```
-
-Current Phase 1 notes:
-- the execution stack is standard Nav2:
-  - `SmacPlanner2D`
-  - `RotationShimController`
-  - `RegulatedPurePursuitController`
-- simulator-side GT obstacle generation is tunable in `OmniLRS/src/environments_wrappers/ros2/gt_map_ros2.py`
-- current GT tuning knobs are:
-  - `mesh_obstacle_padding_m`
-  - `point_instancer_scale_factor`
-  - `point_instancer_padding_m`
-- the Lunaryard Husky controller tuning is set in `OmniLRS/cfg/environment/lunaryard_40m.yaml`
-- for `lunaryard_40m`, use `OMNILRS_ROCKS_ENABLED=true|false` at container startup to control whether rocks exist in the scene
-
-Current rocks-enabled Phase 1 baseline, validated on 2026-04-26 in `docker-compose.lunaryard.yml`:
-- rock sampling in `OmniLRS/cfg/environment/lunaryard_40m.yaml`:
-  - `lambda_parent: 0.02`
-  - `lambda_daughter: 6`
-  - `sigma: 1.2`
-  - uniform rock scale `4.0..10.0`
-- clean GT-map sampled run:
-  - command: `tools/phase1_goal_sweep.py --timeout 120 --auto-free 10 --auto-occupied 4 --min-distance 1.0 --max-distance 5.0 --clearance 0.60 --seed 278`
-  - free goals: `10/10` succeeded
-  - final endpoint error band: `0.116..0.158 m`, mean `0.144 m`
-  - occupied goals: `4/4` blocked cleanly with Nav2 planner error `208` (`NO_VALID_PATH`)
-- broader stress run:
-  - command: `tools/phase1_goal_sweep.py --timeout 120 --auto-free 12 --auto-occupied 4 --min-distance 1.0 --max-distance 7.0 --clearance 0.45 --seed 177`
-  - free goals: `11/12` succeeded, final endpoint error band for successes `0.121..0.170 m`, mean `0.148 m`
-  - one free-space stress goal aborted with controller error `103` (`FollowPath.INVALID_PATH`)
-  - occupied goals: `4/4` blocked cleanly with planner error `208`
-
-### 8. Phase 2 GLIM SLAM Bring-Up
-
-Phase 2 is validated as SLAM evaluation, not as GT-map localization. Nav2 still plans and controls from simulator GT `/gt/map` and GT `gt_map -> odom`; GLIM runs in parallel and is evaluated against true simulator pose and SLAM-frame revisit consistency. Phase 3 consumes a SLAM-derived BEV map and sends goals in the SLAM `map` frame.
-
-`astrobot-dev` builds GLIM from source during the Docker image build:
-
-- `astrobot-lab/src/glim` from `git@github.com:Open-Space-Systems/glim.git`
-- `astrobot-lab/src/glim_ros2` from `git@github.com:Open-Space-Systems/glim_ros2.git`
-- lower-level CUDA/GTSAM/gtsam_points dependencies from apt/Koide's PPA
-
-The built source overlay is installed at `/opt/astrobot/glim_source` and sourced by
-`/etc/ros_setup.sh` before the mounted workspace overlay. Runtime workspace
-auto-build skips `glim` and `glim_ros` by default because they are already built
-into the image.
-
-Start/recreate the Docker services. `astrobot-dev` auto-builds the mounted ROS
-overlay at container startup, so normal usage does not require a manual
-post-launch `colcon build`.
-
-```bash
-OMNILRS_ROCKS_ENABLED=true docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
-```
-
-Run the combined Phase 1 Nav2 + Phase 2 GLIM safe-eval launch:
-
-```bash
-docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
-  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch astrobot_master.launch.py nav2_params:=/workspace/astrobot-lab/astrobot-lab/src/astrobot_launch/config/nav2_phase2_slam.yaml'
-```
-
-Record a reproducible Phase 2 bag while that launch is running:
-
-```bash
-docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
-  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab && source astrobot-lab/install/setup.bash && tools/record_phase2_bag.sh rocks_random_long /workspace/astrobot-lab/rosbags'
-```
-
-Current rocks-collision Phase 2 validation baseline from 2026-05-10:
-
-- `rosbags/phase2_rocks_random_long_20260510_015055` confirms LiDAR-visible rocks after replacing point-instanced rocks with explicit collider-backed rock prims. Corrected/base yaw-aligned ATE with one invalid GT `(0,0)` sample removed: RMSE `0.049 m`, p95 `0.085 m`, final `0.081 m`. SLAM-frame revisit p95 is `0.578 m`, with `100%` of revisits within `1.0 m`.
-- `rosbags/phase2_rocks_double_loop_20260510_023005` uses the denser GLIM map config. Corrected/base yaw-aligned ATE: RMSE `0.108 m`, p95 `0.249 m`, final `0.048 m`. SLAM-frame revisit p95 is `0.632 m`, with `100%` of revisits within `1.0 m`.
-- Rock-height diagnostics on the tuned double-loop show the filtered LiDAR cloud contains `5457` samples above `0.20 m`, and the GLIM global map contains `1533` samples above `0.20 m`.
-- Rock-focused BEV comparison is now tracked separately. Tuned double-loop feature recall improved to `0.218`, but feature F1 remains low at `0.141`; treat this as a Phase 3 map-quality target, not as evidence that rocks are absent.
-- Phase 2 is accepted for GLIM SLAM bring-up, loop/revisit consistency, and BEV map handoff. The current `/astrobot_0/slam/bev_costmap` is the Phase 3 starting point for traversability and Weighted A*; Phase 3 owns final navigation-map safety/connectivity tuning.
-- The older 2026-04-29 Phase 2 pass is superseded for rock validation because the prior point-instanced rocks were represented in GT `/gt/map` but were not reliably visible to LiDAR.
-
-Important Phase 2 details:
-
-- Simulator GT remains evaluation-only for SLAM metrics.
-- `/gt/map` is now the simulator rock-obstacle reference map only. The old
-  terrain mask/slope raster was misleading for rock validation and is no longer
-  published as the default GT map.
-- GLIM consumes `/astrobot_0/lidar_0/pointcloud/filtered`, generated from `/astrobot_0/lidar_0/pointcloud/raw` by a small crop-box filter that removes robot-body returns.
-- GLIM keeps raw points in its map output for visualization. Current mapping config reduces GLIM preprocessing/downsampling to preserve rock geometry (`downsample_resolution=0.25`, submap/global voxel resolution `0.25`).
-- `tools/record_phase2_bag.sh` records true simulator pose from `/gt/base_link_pose`.
-- Direct live-recorded TUM evaluation is currently the authoritative path. `ros2 bag play` replay can shift `/clock` on some recordings, which breaks timestamp matching for replay-generated GLIM poses.
-- GLIM `T_lidar_imu` is IMU-frame to LiDAR-frame; the current front-mounted LiDAR config uses simulator TF `vlp16 <- Imu_Sensor = [-0.136, 0.017, 0.012, 0, 0, 1, 0]`.
-- 2026-05-24 Phase 4 failure isolation found the previous rear-mount `+0.153` z sign caused GLIM's repeated IMU-prediction warnings and sudden multi-meter pose jumps during yaw-heavy exploration.
-- The source GLIM fork exposes `sensors.imu_gravity_magnitude`; the Lunaryard config sets it to `1.62` with `acc_scale=1.0`, avoiding the old binary `libglim.so` lunar-gravity patch.
-- 2026-05-30 Phase 4 hard-seed retesting found a second GLIM IMU issue: the
-  simulator IMU topic is near-zero at rest, so the previous `acc_scale=6.052`
-  over-scaled dynamic acceleration. The active profile now uses
-  `acc_scale=1.0` and `validate_imu=false`.
-- GLIM ROS pose is treated as IMU-frame for metric conversion; `slam_eval transform_tum` converts IMU to base-frame with `[0.264, 0.017, -0.262, yaw=pi]`. The simulator TF is `base_link -> Imu_Sensor = [0.264, 0.017, 0.262, yaw=pi]`.
-- For live Foxglove viewing, use fixed frame `map` and start with `/astrobot_0/slam/aligned_points_corrected`; `/astrobot_0/slam/glim_map` is GLIM's global-map PointCloud2 output and may update less continuously than the aligned local/submap cloud.
-- The packaged GLIM build does not include `libimu_validator.so`; use GLIM's built-in validation logs unless `glim_ext` is built from source.
-- Do not disable simulator GT TF or publish a SLAM-owned `map -> odom` while sending GT-map goals for Phase 2; that mixes coordinate frames and is intentionally not a supported path.
-
-### 9. Launch Phase 3 SLAM-Backed Navigation
-
-Phase 3 moves Nav2 into the SLAM/BEV frame. The simulator still publishes GT
-topics for scoring, but simulator-owned GT `gt_map -> odom` must be disabled to
-avoid competing TF publishers.
-
-```bash
-OMNILRS_ROCKS_ENABLED=true OMNILRS_GT_TF_ENABLED=false \
-  docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
-```
-
-Launch GLIM, the probabilistic voxel/BEV mapping chain, the SLAM-frame `map -> odom`
-bridge, Nav2 Smac 2D, and `basic_control`:
-
-```bash
-docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
-  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase3_nav.launch.py'
-```
-
-`phase3_nav.launch.py` defaults `slam_start_delay:=15.0` so GLIM starts after
-the simulator/robot has settled. Do not remove this delay unless you have
-verified GLIM initializes near the origin; bad early initialization can put the
-robot outside the fixed BEV map extent.
-
-Phase 3 now defaults to the patched LiDAR/IMU GLIM profile `glim_astrobot`.
-The SLAM pose is treated as IMU-frame, so the launch default converts it to
-`base_link` with:
-`slam_base_offset_x:=0.264 slam_base_offset_y:=0.017 slam_base_yaw_offset:=3.141592653589793`.
-The LiDAR-only CT-ICP profile `glim_astrobot_lidar_only` remains available as a
-fallback; if using it, override the base offset back to the LiDAR-frame values:
-`slam_base_offset_x:=0.150 slam_base_offset_y:=0.0 slam_base_yaw_offset:=0.0`.
-
-Send short-horizon goals in the SLAM map frame:
-
-```bash
-docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
-  'source /etc/ros_setup.sh && ros2 action send_goal /astrobot_0/navigate_to_pose nav2_msgs/action/NavigateToPose "{pose: {header: {frame_id: map}, pose: {position: {x: 0.6, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}}"'
-```
-
-Or run the scripted Phase 3 probe smoke test:
-
-```bash
-docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
-  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab && source astrobot-lab/install/setup.bash && python3 tools/phase3_probe_sweep.py --goal-timeout 90 --return-home-every 2 --relative-goal 0.6,0.0 --relative-goal 0.0,0.6 --output /workspace/astrobot-lab/rosbags/phase3_probe_summary.json'
-```
-
-Key Phase 3 topics to visualize:
-
-- `/astrobot_0/slam/pose_corrected`
-- `/astrobot_0/slam/aligned_points_corrected`
-- `/astrobot_0/slam/glim_map`
-- `/astrobot_0/slam/prob_voxel_map`
-- `/astrobot_0/slam/bev_costmap`
-- `/tf`
-- `/astrobot_0/odom`
-- `/astrobot_0/cmd_vel_nav`
-- `/astrobot_0/cmd_vel`
-- `/astrobot_0/navigate_to_pose/_action/status`
-
-Use fixed frame `map` in Foxglove. `/astrobot_0/slam/prob_voxel_map` is the optional
-3D occupancy visualization with `log_odds` as a PointCloud2 field.
-`/astrobot_0/slam/bev_costmap` is the planner-facing `nav_msgs/OccupancyGrid`.
-
-Current Phase 3 gate, validated online in rocks-enabled Lunaryard on 2026-05-17:
-
-- command output: `rosbags/phase3_gate_20260517/nav_20_goal_gate_3m_lio_online_201648.json`
-- GLIM profile: `glim_astrobot` LiDAR/IMU
-- route: 15 relative 3 m-class probes plus 5 return-home commands
-- result: `20/20` navigation actions and `5/5` return-home actions succeeded
-- endpoint error: min `0.085 m`, median `0.214 m`, p95 `0.283 m`, max `0.294 m`
-- known follow-up: runtime performance tuning, because live GLIM + mapping can make Nav2 miss its 10 Hz control loop
-
-### 10. Launch Phase 4 resource-aware exploration
-
-Phase 4 adds autonomous single-robot frontier exploration on top of Phase 3. It
-also publishes simulator-owned resource truth maps for scoring/visualization and
-entered-cell resource samples for autonomy.
-
-> **Gate status (2026-06-07):** the official PASS/FAIL comes from the GT-scored gate
-> harness — `tools/phase4_mission_gate_run.sh <seed> <mode>` per gate, or
-> `tools/phase4_gate_suite.sh` for the full seeds×modes matrix. Current matrix:
-> `sample_return` 2/3 (42 ✓, 411 ✗ residual SLAM accuracy, 7 ✓);
-> `explore_radius` 0/3 (dense-rock-cluster stall cascade). Full status, the change
-> log that got here (CPU GLIM, rocks-instancer fix, BEV mapper retune, recovery
-> wiring fix, …) and the remaining-blocker fix menu live in
-> `PHASE_DEFINITIONS.md` → Phase 4 → *Current status*; runnable commands in
-> `useful_cmds.md` → *Phase 4 gate harness & suite*. SLAM runs on **CPU GLIM** by
-> design (see `astrobot-lab/src/glim_slam_launch/config/glim_astrobot/README.md`).
-
-Deterministic resource smoke run:
-
-```bash
-OMNILRS_ROCKS_ENABLED=true OMNILRS_GT_TF_ENABLED=false OMNILRS_RESOURCE_MODE=deterministic \
-  docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
-
-docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
-  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase4_exploration.launch.py mission_mode:=explore_radius'
-```
-
-Randomized resource gate-style run:
-
-```bash
-OMNILRS_ROCKS_ENABLED=true OMNILRS_GT_TF_ENABLED=false OMNILRS_RESOURCE_MODE=random OMNILRS_RESOURCE_SEED=1001 \
-  docker compose -f docker-compose.lunaryard.yml up -d --build --force-recreate
-```
-
-Use `mission_mode:=sample_return` to stop once the robot enters a cell with a
-sample above `sample_success_threshold`.
-
-Current Phase 4 status:
-- `exploration_manager` is the active autonomous goal selector.
-- The planner does not consume the full GT resource map. It only consumes entered-cell samples from `/astrobot_0/resource/water/sample`.
-- GT resource maps under `/gt/resource_maps/water` are for visualization and evaluation.
-- `explore_radius` has a partial gate pass on an 8 m radius / 2 m mission grid:
-  - run: `rosbags/phase4_abundant_gate80_radius8_candidate_fix_20260524_232015`
-  - result: `42/52 = 80.77%` reachable mission cells covered
-  - Nav2 failures: `0`
-  - SLAM jumps: `0`
-  - note: return-home was stopped after proving the coverage threshold to avoid a long breadcrumb tail
-- `sample_return` has a hard seeded pass:
-  - run: `rosbags/phase4_abundant_sample_return_hard_seed411_20260525_212515`
-  - threshold: `0.80`
-  - best sample: `0.826`
-  - return home: succeeded
-  - Nav2 failures: `0`
-  - SLAM jumps: `0`
-- Latest 2026-05-30 hard seed `411` diagnostic retest:
-  - with old `acc_scale=6.052`, the 8 m / 80% explore run reproduced
-    multi-meter SLAM divergence
-  - with `validate_imu=false` only, GLIM warnings disappeared but drift still
-    returned
-  - with `validate_imu=false` and `acc_scale=1.0`, the same run stayed bounded
-    with max observed SLAM-vs-GT error about `0.62 m`
-  - it reached `27/51 = 51.9%` coverage before return-home/max-goal behavior;
-    remaining limitation appears to be exploration/reachability tuning, not
-    SLAM divergence
-
-Known Phase 4 limitations:
-- The full statistical gate of `3` randomized `explore_radius` and `3` randomized `sample_return` runs is not complete.
-- The larger/harder coverage gate still needs to be rerun end-to-end with the
-  current GLIM IMU config and updated rock-only GT scoring.
-- Breadcrumb return-home works but can be inefficient on long routes.
-- UI/tooling is the next step so resource maps, sampled cells, candidate scores, return state, and diagnostics are visible during longer tests.
-
-Phase 4 topics to visualize:
-
-```text
-/gt/resource_maps/water
-/astrobot_0/resource/water/sample
-/astrobot_0/resource/water/sample_pose
-/astrobot_0/exploration/frontiers
-/astrobot_0/exploration/selected_goal
-/astrobot_0/exploration/events
-/astrobot_0/exploration/status
-/astrobot_0/exploration/mission_grid
-/astrobot_0/diagnostics
-/astrobot_0/slam/bev_costmap
-/astrobot_0/navigate_to_pose/_action/status
-```
-
-The Phase 4 gate harness now writes per-attempt navigation artifacts by default
-under `rosbags/phase4_gate_artifacts/`, including `goal_events.jsonl`,
-`diagnostics.jsonl`, TUM traces, and stall/spin costmap snapshots. Summarize them
-with `python3 tools/phase4_nav_diagnostics_summary.py rosbags/phase4_gate_suite.json`.
-
-### 11. Phase 5 mission console prototype
-
-The custom GUI is now split into:
-- `astrobot_ui_backend`: ROS 2 + FastAPI read-only bridge.
-- `ui/astrobot-console`: Vite React frontend with mock telemetry fallback.
-
-Run the frontend-only mockup locally:
-
-```bash
-cd ui/astrobot-console
-npm install
-npm run dev
-```
-
-Open:
-
-```text
-http://localhost:5173
-```
-
-To view live ROS state, start Phase 4/Phase 5 autonomy first, then launch the
-UI backend in `astrobot-dev`:
-
-```bash
-docker compose -f docker-compose.lunaryard.yml exec astrobot-dev bash -lc \
-  'source /etc/ros_setup.sh && cd /workspace/astrobot-lab/astrobot-lab && source install/setup.bash && ros2 launch astrobot_launch phase5_gui.launch.py'
-```
-
-Then run `npm run dev` locally. The Vite dev server proxies `/api` and
-`/ws/telemetry` to `127.0.0.1:8080`.
-
-Current GUI scope:
-- BEV overlays: obstacle costmap, water resource map, mission grid, GT debug map.
-- Robot pose/icon, selected goal, optional past trajectory, and future plan.
-- Mission status and robot health/status badges.
-- Two diagnostics panels with compact time-series plots.
-- Three camera cards with topic availability placeholders; image streaming is a
-  follow-up item.
-
-### 12. Optional local Isaac Sim GUI smoke test
-
-```bash
-xhost +local:root
-DISPLAY=${DISPLAY:-:0} OMNILRS_HEADLESS=false docker compose -f docker-compose.lunaryard.yml up -d
-```
-
-The remote workflow is preferred when your local machine does not have a supported RTX GPU.
-
-`docker-compose.lunalab.yml` is still kept for the smaller indoor environment, but
-`docker-compose.lunaryard.yml` is now the default workflow. Use `OMNILRS_HEADLESS=false`
-when you want a local Isaac Sim window.
+Missions: `explore_radius`, `sample_return`, `teleop_click` (click goals in the console).
+`--eval` scores the run against ground truth and writes `runs/<run>/result.json`; Ctrl-C tears
+the simulator down. See [docs/running.md](docs/running.md).
+
+## Packages
+
+| Package | Language | Role |
+|---|---|---|
+| `astrobot_interfaces` | IDL | Messages and services (SLAM revisions, localization status, map reset) |
+| `astrobot_localization` | C++ | Localization supervisor (owns GLIM, gates RTK fixes, motion permission) and map->odom TF |
+| `astrobot_glim_extensions` | C++ | GLIM extension modules: RTK constraint on the odometry smoother, SLAM revision publisher |
+| `astrobot_terrain` | C++ | Layered geometric terrain from native LiDAR chunks: Nav2 local window, global cost mosaic, exploration map |
+| `astrobot_exploration` | C++ | Mission manager on Nav2 with pluginlib mission strategies |
+| `astrobot_control` | C++ | Velocity command mux (navigation, teleop, e-stop, localization permission) |
+| `astrobot_bringup` | launch / YAML | `mission.launch.py`, `console.launch.py`, robot geometry, Nav2 parameters, behaviour trees |
+| `astrobot_sim` | Python | Simulation only: synthetic RTK and GT diagnostics |
+| `astrobot_eval` | Python | Simulation only: GT mission verdict and rock-contact scoring |
+| `astrobot_ui_backend` | Python | Ops console backend (`ui/astrobot-console` is the web frontend) |
+| `glim`, `glim_ros2` | C++ | GLIM forks (submodules): lunar gravity, IMU/odometry fixes, clean extension teardown |
+
+[docs/architecture.md](docs/architecture.md) describes the node graph, frames and the
+localization state machine; [docs/extending.md](docs/extending.md) covers new missions, seeds,
+world settings and swapping components.
+
+## Development
+
+- `scripts/check.sh` builds the release packages and runs the unit tests and linters.
+- Research, capture and debugging tooling lives on the development branch (`dev/phase-5`)
+  under `research/`; `main` is cut from it without `research/` (`research/scripts/cut_release.sh`).
+- Licence: Apache-2.0 ([LICENSE](LICENSE)). GLIM is MIT, OmniLRS BSD-3-Clause (submodules).

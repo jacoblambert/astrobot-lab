@@ -1,0 +1,7 @@
+# The dev image (docker/dev.Dockerfile, context = repo root) only copies the GLIM forks and its
+# entrypoint; everything else (OmniLRS, .git, runs, build trees) stays out of the build context.
+*
+!astrobot-lab/src/glim
+!astrobot-lab/src/glim_ros2
+!docker/dev_entrypoint.sh
+astrobot-lab/src/glim*/.git

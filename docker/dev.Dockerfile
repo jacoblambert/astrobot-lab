@@ -27,8 +27,9 @@ RUN set -eux; \
       ros-jazzy-teleop-twist-keyboard; \
     rm -rf /var/lib/apt/lists/*
 
-# GLIM provides the LiDAR-IMU SLAM stack. We install the lower-level dependencies
-# from Koide's PPA, then build our GLIM and glim_ros2 forks from source below.
+# GLIM provides the LiDAR-IMU SLAM stack. CUDA comes from NVIDIA's repository; GTSAM and
+# gtsam_points are built from pinned tags below (the PPA republishes newer snapshots under the
+# same version numbers), then our GLIM and glim_ros2 forks.
 # The GLIM stack links against libcudart, which is not provided by the NVIDIA
 # container runtime driver mounts.
 RUN set -ex; \
@@ -38,20 +39,15 @@ RUN set -ex; \
       "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb"; \
     dpkg -i /tmp/cuda-keyring.deb; \
     rm -f /tmp/cuda-keyring.deb; \
-    curl -s --compressed "https://koide3.github.io/ppa/ubuntu2404/KEY.gpg" \
-      | gpg --dearmor > /etc/apt/trusted.gpg.d/koide3_ppa.gpg; \
-    echo "deb [signed-by=/etc/apt/trusted.gpg.d/koide3_ppa.gpg] https://koide3.github.io/ppa/ubuntu2404 ./" \
-      > /etc/apt/sources.list.d/koide3_ppa.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
       "${CUDA_RUNTIME_PACKAGE}" \
       cuda-cudart-dev-12-6 \
       cuda-nvcc-12-6 \
+      git \
       libboost-all-dev \
+      libeigen3-dev \
       libglfw3-dev \
-      libgtsam-notbb-dev \
-      libgtsam-points-cuda12.6-dev \
-      libiridescence-dev \
       libmetis-dev \
       libopencv-dev \
       ros-jazzy-ament-cmake-auto \
@@ -68,6 +64,38 @@ RUN set -ex; \
       ros-jazzy-tf2-ros; \
     ldconfig; \
     rm -rf /var/lib/apt/lists/*
+
+# GTSAM 4.3a0 and gtsam_points 1.2.1: the versions every validated run used (headers verified
+# against the earlier PPA builds). Options match those builds: no TBB, system Eigen and METIS.
+ARG GTSAM_TAG=4.3a0
+ARG GTSAM_POINTS_TAG=v1.2.1
+ARG CUDA_ARCHITECTURES="75;80;86;89;90"
+# cuSPARSE/cuSOLVER/cuRAND dev packages only provide headers for gtsam_points' error helpers
+# (the built library links just libcudart); they are purged in the same layer.
+RUN set -ex; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends libcusparse-dev-12-6 libcusolver-dev-12-6 \
+      libcurand-dev-12-6; \
+    git clone --depth 1 --branch "${GTSAM_TAG}" https://github.com/borglab/gtsam /tmp/gtsam; \
+    cmake -S /tmp/gtsam -B /tmp/gtsam/build -DCMAKE_BUILD_TYPE=Release \
+      -DGTSAM_BUILD_EXAMPLES_ALWAYS=OFF -DGTSAM_BUILD_TESTS=OFF -DGTSAM_BUILD_UNSTABLE=ON \
+      -DGTSAM_WITH_TBB=OFF -DGTSAM_USE_SYSTEM_EIGEN=ON -DGTSAM_USE_SYSTEM_METIS=ON \
+      -DGTSAM_BUILD_WITH_MARCH_NATIVE=OFF -DGTSAM_POSE3_EXPMAP=ON -DGTSAM_ROT3_EXPMAP=ON \
+      -DGTSAM_USE_QUATERNIONS=OFF -DGTSAM_TANGENT_PREINTEGRATION=ON \
+      -DGTSAM_ALLOW_DEPRECATED_SINCE_V43=ON -DGTSAM_SUPPORT_NESTED_DISSECTION=ON; \
+    cmake --build /tmp/gtsam/build -j"$(nproc)"; \
+    cmake --install /tmp/gtsam/build; \
+    git clone --depth 1 --branch "${GTSAM_POINTS_TAG}" https://github.com/koide3/gtsam_points /tmp/gtsam_points; \
+    cmake -S /tmp/gtsam_points -B /tmp/gtsam_points/build -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_WITH_CUDA=ON -DBUILD_WITH_TBB=OFF -DBUILD_WITH_OPENMP=ON -DBUILD_WITH_MARCH_NATIVE=OFF \
+      -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.6/bin/nvcc \
+      -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}"; \
+    cmake --build /tmp/gtsam_points/build -j"$(nproc)"; \
+    cmake --install /tmp/gtsam_points/build; \
+    rm -rf /tmp/gtsam /tmp/gtsam_points; \
+    apt-get purge -y 'libcusparse*' 'libcusolver*' 'libcurand*' 'libcublas*' 'libnvjitlink*'; \
+    rm -rf /var/lib/apt/lists/*; \
+    ldconfig
 
 # Build GLIM core and ROS wrapper from our forks. The core fork exposes
 # sensors.imu_gravity_magnitude, so lunar gravity is configured in JSON instead

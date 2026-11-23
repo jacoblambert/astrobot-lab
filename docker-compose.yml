@@ -1,28 +1,73 @@
+# Astrobot simulation stack: the Isaac Sim / OmniLRS lunar yard (astrobot-sim) and the ROS 2
+# workspace container (astrobot-dev). scripts/run_mission.sh drives both; by hand:
+#   docker compose up -d astrobot-dev                      # builds the workspace on first start
+#   OMNILRS_ENVIRONMENT_SEED=42 docker compose up -d --no-deps astrobot-sim
+#   docker compose exec astrobot-dev bash -lc "ros2 launch astrobot_bringup mission.launch.py mission:=explore_radius"
+# Tear the sim down with `docker compose stop astrobot-sim && docker compose rm -f astrobot-sim`.
 services:
   astrobot-sim:
     image: isaac-sim-omnilrs:latest
     container_name: astrobot-sim
+    runtime: nvidia
+    networks: [ros2]
+    ipc: host
+    privileged: true
+    # One world per mission: a crash is a failed run, never a silently restarted world.
+    restart: "no"
     environment:
-      - DISPLAY=${DISPLAY}
-      - ROS_DOMAIN_ID=177
+      - ACCEPT_EULA=Y
+      - PRIVACY_CONSENT=Y
+      - DISPLAY=${DISPLAY:-}
+      - QT_X11_NO_MITSHM=1
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-177}
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - CYCLONEDDS_URI=file:///config/cyclonedds_config.xml
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - ASTROBOT_ROBOT_NAMESPACE=astrobot_0
+      # World (OmniLRS/cfg/environment/lunaryard_40m.yaml): seed and rocks.
+      - OMNILRS_ENVIRONMENT=lunaryard_40m
+      - OMNILRS_ENVIRONMENT_SEED=${OMNILRS_ENVIRONMENT_SEED:-42}
+      - OMNILRS_ROCKS_ENABLED=true
+      - OMNILRS_HEADLESS=${OMNILRS_HEADLESS:-true}
+      - OMNILRS_DISABLE_VIEWPORT_UPDATES=true
+      # Navigation stream: selected LiDAR (native chunks + GLIM points), physical IMU, no drive.
+      # (The research capture modes, OMNILRS_TERRAIN_* and OMNILRS_NATURAL_HOLDOUT, default off.)
+      - OMNILRS_SELECTED_NAV=true
+      - OMNILRS_SELECTED_LIDAR=true
+      - ASTROBOT_SELECTED_LIDAR_PROFILE=selected_optical_v2
+      - OMNILRS_PHYSICS_IMU=true
+      - OMNILRS_TERRAIN_NATIVE_PUBLISH=true
+      # Ground truth for evaluation only; MUST NOT publish TF (SLAM owns map->odom).
+      - OMNILRS_GT_TF_ENABLED=false
+      - OMNILRS_GT_MAP_ENABLED=true
+      # Resource field (sample_return): centres x,y,peak,sigma; empty = random field.
+      - OMNILRS_RESOURCE_ENABLED=${OMNILRS_RESOURCE_ENABLED:-true}
+      - OMNILRS_RESOURCE_MODE=${OMNILRS_RESOURCE_MODE:-deterministic}
+      - OMNILRS_RESOURCE_SEED=${OMNILRS_RESOURCE_SEED:-4242}
+      - OMNILRS_RESOURCE_LAYERS=water
+      - OMNILRS_RESOURCE_CENTERS=${OMNILRS_RESOURCE_CENTERS:-}
+      - OMNILRS_RESOURCE_RANDOM_GAUSSIANS=3
+      - OMNILRS_RESOURCE_RANDOM_SIGMA_MIN=3.5
+      - OMNILRS_RESOURCE_RANDOM_SIGMA_MAX=7.5
+      # Front camera for the Ops console (extra render load; never on for gates).
+      - OMNILRS_CAMERA_ENABLED=${OMNILRS_CAMERA_ENABLED:-false}
+      - OMNILRS_RUN_DIR=${OMNILRS_RUN_DIR:-}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - ./OmniLRS:/workspace/omnilrs
+      - ./OmniLRS:/workspace/omnilrs:rw
+      - ./docker:/workspace/astrobot-lab/docker:ro
       - ./config:/config:ro
-    command:
-      [
-        "bash",
-        "-lc",
-        "unset LD_LIBRARY_PATH && source /opt/ros/jazzy/setup.bash && ros2 topic list && echo $RMW_IMPLEMENTATION && ros2 topic pub /chatter std_msgs/msg/String 'data: Hello World!'",
-      ]
-    networks:
-      - ros2
-    ipc: host
-    restart: always
-    privileged: true
-    tty: true
+      - ./runs:/runs:rw
+      - isaac-kit-cache:/isaac-sim/kit/cache:rw
+      - isaac-ov-cache:/root/.cache/ov:rw
+      - isaac-pip-cache:/root/.cache/pip:rw
+      - isaac-gl-cache:/root/.cache/nvidia/GLCache:rw
+      - isaac-compute-cache:/root/.nv/ComputeCache:rw
+      - isaac-logs:/root/.nvidia-omniverse/logs:rw
+      - isaac-data:/root/.local/share/ov/data:rw
+      - isaac-documents:/root/Documents:rw
+    command: ["bash", "-lc", "/workspace/astrobot-lab/docker/run_omnilrs.sh"]
 
   astrobot-dev:
     image: astrobot-dev:latest
@@ -30,29 +75,44 @@ services:
       context: .
       dockerfile: docker/dev.Dockerfile
     container_name: astrobot-dev
+    runtime: nvidia
+    user: root
+    networks: [ros2]
+    ipc: host
+    privileged: true
     environment:
-      - DISPLAY=${DISPLAY}
-      - ROS_DOMAIN_ID=177
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-177}
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - CYCLONEDDS_URI=file:///config/cyclonedds_config.xml
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - ASTROBOT_AUTO_BUILD=${ASTROBOT_AUTO_BUILD:-true}
+      - ASTROBOT_BUILD_SOURCE_GLIM=${ASTROBOT_BUILD_SOURCE_GLIM:-false}
     ports:
-      - "127.0.0.1:8765:8765"
+      # 8080 = Ops console backend, 8765 = foxglove_bridge. Bound on all interfaces so other
+      # machines can reach them; the console has no authentication (sim/demo use only).
+      - "8080:8080"
+      - "8765:8765"
     volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ./:/workspace/astrobot-lab:rw
+      - ./OmniLRS:/workspace/omnilrs:rw
       - ./config:/config:ro
-    command:
-      [
-        "bash",
-        "-lc",
-        "source /etc/ros_setup.sh && ros2 topic list && echo $RMW_IMPLEMENTATION && ros2 topic echo /chatter std_msgs/msg/String",
-      ]
-    networks:
-      - ros2
-    ipc: host
-    restart: always
-    privileged: true
+      - ./runs:/runs:rw
+    command: ["bash", "-lc", "sleep infinity"]
+    restart: unless-stopped
     tty: true
+    stdin_open: true
 
 networks:
   ros2:
     driver: bridge
+
+volumes:
+  isaac-kit-cache:
+  isaac-ov-cache:
+  isaac-pip-cache:
+  isaac-gl-cache:
+  isaac-compute-cache:
+  isaac-logs:
+  isaac-data:
+  isaac-documents:
