@@ -1,0 +1,11 @@
+<library path="astrobot_exploration_strategies">
+  <class name="astrobot_exploration/ExploreRadius" type="astrobot_exploration::ExploreRadius" base_class_type="astrobot_exploration::MissionStrategy">
+    <description>Coverage of a disc around home: visit coverage cells, nearest first.</description>
+  </class>
+  <class name="astrobot_exploration/SampleReturn" type="astrobot_exploration::SampleReturn" base_class_type="astrobot_exploration::MissionStrategy">
+    <description>Point-sensed resource search; return home at the first sample above the threshold.</description>
+  </class>
+  <class name="astrobot_exploration/TeleopClick" type="astrobot_exploration::TeleopClick" base_class_type="astrobot_exploration::MissionStrategy">
+    <description>Operator goals from teleop/goal only.</description>
+  </class>
+</library>

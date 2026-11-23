@@ -1,0 +1,8 @@
+# teleop_click: the operator clicks goals in the Ops console (teleop/goal); no mission end.
+/**/exploration_manager:
+  ros__parameters:
+    mission_mode: teleop_click
+    mission_plugin: astrobot_exploration/TeleopClick
+    home_radius_m: 16.0
+    # true: operator goals get the same global-planner precheck as autonomous goals
+    teleop_precheck_enabled: false

@@ -1,0 +1,11 @@
+# explore_radius: visit coverage_goal_fraction of the coverage cells inside home_radius_m.
+# Values of the validated mission gates (seeds 42/411/7). Common values are the node defaults.
+/**/exploration_manager:
+  ros__parameters:
+    mission_mode: explore_radius
+    mission_plugin: astrobot_exploration/ExploreRadius
+    coverage_goal_fraction: 0.70
+    home_radius_m: 8.0
+    mission_cell_size_m: 2.0
+    mission_candidate_limit: 120
+    max_duration_sec: 1800.0

@@ -1,0 +1,16 @@
+# sample_return: search for a resource sample >= sample_success_threshold, then return home.
+# Values of the validated mission gates (seeds 42/411/7). Common values are the node defaults.
+/**/exploration_manager:
+  ros__parameters:
+    mission_mode: sample_return
+    mission_plugin: astrobot_exploration/SampleReturn
+    sample_success_threshold: 0.75
+    resource_names: water
+    resource_weights: "water:1.0"
+    resource_weight_scale: 25.0
+    info_weight: 0.3
+    resource_gradient_weight: 10.0
+    home_penalty_weight: 0.5
+    home_radius_m: 19.0
+    max_goal_distance_m: 5.0
+    max_duration_sec: 1200.0
