@@ -1,0 +1,18 @@
+# Rover geometry shared by the core nodes (applies to every node that declares these parameters).
+# Base frame: base_link, x forward, z up. Values from the mount-audited selected LiDAR setup
+# (selected_optical_v2) and the measured IMU extrinsic of the validated captures.
+/**:
+  ros__parameters:
+    # base_link <- IMU, row-major 4x4 (GLIM's pose_corrected frame is the IMU).
+    base_from_imu: [-0.9999999999999988, 1.45887500902828e-09, -4.7994463431557217e-08, 0.2639997454584382,
+                    -1.4588746978315028e-09, -0.9999999999999998, -6.489806559373336e-09, 0.017281134465747527,
+                    -4.799446344203135e-08, -6.489806482569912e-09, 0.9999999999999988, 0.26247012433535266,
+                    0.0, 0.0, 0.0, 1.0]
+    # base_link <- LiDAR optical origin (level mount).
+    base_from_lidar_translation: [0.4, 0.0, 0.45]
+    # Chassis self-return box in base_link [x0, y0, z0, x1, y1, z1] (asset cube + 1 mm margin).
+    chassis_aabb: [-0.5047, -0.28645, -0.00977, 0.5047, 0.28645, 0.25973]
+    # Padded Nav2 footprint half extents and padding (nav2.yaml footprint 0.495 x 0.335 + 0.10).
+    footprint_half_length: 0.595
+    footprint_half_width: 0.43500000000000005  # 0.335 + 0.10 as Nav2 pads it
+    footprint_padding: 0.10
